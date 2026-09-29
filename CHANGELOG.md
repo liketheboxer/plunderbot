@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 (2026-09-29): Crew emoji and session names
+
+- Captains can name a session with `/crew start name:` or `/crew rename`; the name goes on the card and the voice channel ("⛵ | Fort Night").
+- Crew voice channels are named in the server's style ("⛵ | Boxer's Sloop") with an emoji per game, and per size where a game has named sizes. `/admin crew emoji` picks them, including server emoji for crew cards.
+
 ## 0.2.0 (2026-09-29): Crew Call
 
 Phase 2 of 8.

@@ -12,7 +12,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .. import games
+from .. import crew_emoji, games
+from ..crew_logic import voice_channel_name
 from ..birthday_logic import valid_timezone
 
 _ZONES = sorted(available_timezones())
@@ -234,6 +235,72 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
                          "\"Allow anyone to @mention this role\": " + ", ".join(unmentionable))
         text = "\n".join(lines)
         await interaction.followup.send(text[:1990], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    @crew.command(name="emoji", description="Pick the emoji for a game's crew cards and voice channels")
+    @app_commands.describe(game="Which game", size="One crew size, or leave empty for every size of the game",
+                           emoji="A standard emoji or one of this server's emoji; type reset to go back to the default")
+    @app_commands.choices(game=[app_commands.Choice(name=g.name, value=g.key) for g in games.GAMES])
+    async def crew_emoji_cmd(self, interaction: discord.Interaction, game: app_commands.Choice[str],
+                             emoji: str, size: str | None = None) -> None:
+        profile = games.get(game.value)
+        label = ""
+        if size:
+            chosen = profile.size(size)
+            if chosen is None:
+                await interaction.response.send_message(
+                    f"{profile.name} sizes are: {', '.join(s.label for s in profile.sizes)}.", ephemeral=True)
+                return
+            label = chosen.label
+        what = f"{profile.name} {label}".strip() if label else f"every {profile.name} crew"
+        value = emoji.strip()
+        if value.lower() == "reset":
+            await self.bot.db.set_crew_emoji(interaction.guild_id, profile.key, label, standard=None, server=None)
+            channel, card = crew_emoji.resolve(profile, label or profile.default_size.label,
+                                               await self.bot.db.crew_emoji(interaction.guild_id))
+            await interaction.response.send_message(f"Reset {what}: now {card}.", ephemeral=True)
+            return
+        if crew_emoji.is_custom(value):
+            emoji_id = int(value.rsplit(":", 1)[1].rstrip(">"))
+            if interaction.guild.get_emoji(emoji_id) is None:
+                await interaction.response.send_message(
+                    "That emoji isn't one of this server's, so I can't be sure I'll be able to show it. "
+                    "Pick one from the list as you type.", ephemeral=True)
+                return
+            await self.bot.db.set_crew_emoji(interaction.guild_id, profile.key, label, server=value)
+            channel, _ = crew_emoji.resolve(profile, label or profile.default_size.label,
+                                            await self.bot.db.crew_emoji(interaction.guild_id))
+            await interaction.response.send_message(
+                f"Crew cards for {what} will show {value}. Discord doesn't allow server emoji in channel names, "
+                f"so the voice channel keeps {channel}. Set a standard emoji too to change that.", ephemeral=True)
+            return
+        if not crew_emoji.is_standard(value):
+            await interaction.response.send_message(
+                "That doesn't look like an emoji. Paste a standard emoji, or pick a server emoji from the list.",
+                ephemeral=True)
+            return
+        await self.bot.db.set_crew_emoji(interaction.guild_id, profile.key, label, standard=value)
+        sample = profile.size(label) or profile.default_size
+        preview = voice_channel_name(profile, sample.label, interaction.user.display_name, value)
+        await interaction.response.send_message(
+            f"Done: {what} will use {value}. A voice channel will look like **{preview}**.", ephemeral=True)
+
+    @crew_emoji_cmd.autocomplete("size")
+    async def crew_emoji_size_ac(self, interaction: discord.Interaction, current: str):
+        profile = games.get(getattr(interaction.namespace, "game", None))
+        sizes = profile.sizes if profile and not profile.open_ended else ()
+        return [app_commands.Choice(name=s.label, value=s.label) for s in sizes
+                if current.lower() in s.label.lower()][:25]
+
+    @crew_emoji_cmd.autocomplete("emoji")
+    async def crew_emoji_emoji_ac(self, interaction: discord.Interaction, current: str):
+        needle = current.strip(":").lower()
+        options = [app_commands.Choice(name="reset (back to the default)", value="reset")] if "reset".startswith(needle) else []
+        for e in interaction.guild.emojis:
+            if needle in e.name.lower():
+                options.append(app_commands.Choice(name=f":{e.name}: (server emoji)", value=str(e)))
+        if current and crew_emoji.is_standard(current):
+            options.insert(0, app_commands.Choice(name=current, value=current))
+        return options[:25]
 
 
 async def setup(bot) -> None:

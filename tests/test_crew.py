@@ -30,8 +30,12 @@ def test_profiles_are_consistent():
 def test_voice_channel_names_fit():
     name = voice_channel_name(games.get("artemis"), "6 players", "A" * 200)
     assert len(name) <= 100
-    assert voice_channel_name(games.get("sot"), "Sloop", "Boxer") == "Sea of Thieves · Boxer's Sloop"
-    assert voice_channel_name(games.get("hangout"), "Hangout", "Boxer") == "Boxer's 1 Player Hangout"
+    assert voice_channel_name(games.get("sot"), "Sloop", "Boxer") == "⛵ | Boxer's Sloop"
+    assert voice_channel_name(games.get("sot"), "Galleon", "Boxer") == "🚢 | Boxer's Galleon"
+    assert voice_channel_name(games.get("fortnite"), "Squad", "Boxer") == "🪂 | Boxer's Fortnite Squad"
+    assert voice_channel_name(games.get("helldivers"), "4 players", "Boxer") == "🪖 | Boxer's Helldivers"
+    assert voice_channel_name(games.get("hangout"), "Hangout", "Boxer") == "🛋️ | Boxer's 1 Player Hangout"
+    assert voice_channel_name(games.get("sot"), "Sloop", "Boxer", "🏴‍☠️") == "🏴‍☠️ | Boxer's Sloop"
 
 
 # ------------------------------------------------------------ database
@@ -209,7 +213,7 @@ async def test_full_crew_sails_and_cleans_up(crew_env):
     crew = await bot.db.get_crew(crew.id)
     assert crew.status == "sailing" and crew.voice_channel_id
     vc = guild.voices[crew.voice_channel_id]
-    assert vc.name == "Sea of Thieves · Boxer's Sloop" and vc.user_limit is None
+    assert vc.name == "⛵ | Boxer's Sloop" and vc.user_limit is None
     assert any("<@2>" in (c or "") for c, _ in text.sent)  # the crew is pinged with the channel
 
     late = interaction_for(guild, 4)
@@ -322,3 +326,43 @@ async def test_hangout_opens_voice_at_once_and_never_fills(crew_env):
     assert len(embed) <= 6000 and all(len(f.value) <= 1024 for f in embed.fields)
     from plunderbot.cogs.crew import card_view
     assert [c.action for c in card_view(crew).children] == ["join", "leave", "close"]
+
+
+
+def test_emoji_rules():
+    from plunderbot import crew_emoji as ce
+    assert ce.is_custom("<:galleon:123456789012345678>") and ce.is_custom("<a:wave:123456789012345678>")
+    assert not ce.is_custom(":galleon:")
+    for good in ("⛵", "🚢", "🏴‍☠️", "🛥️", "🇺🇸", "👍🏽"):
+        assert ce.is_standard(good), good
+    for bad in ("sloop", "a⛵", "", "<:x:1>", "⛵" * 13):
+        assert not ce.is_standard(bad), bad
+    sot = games.get("sot")
+    assert ce.resolve(sot, "Galleon", {}) == ("🚢", "🚢")
+    picks = {("sot", ""): ("🏴‍☠️", None), ("sot", "Galleon"): (None, "<:galleon:123456789012345678>")}
+    # Galleon: size-specific server emoji on the card; channel falls back to the game-wide standard pick.
+    assert ce.resolve(sot, "Galleon", picks) == ("🏴‍☠️", "<:galleon:123456789012345678>")
+    assert ce.resolve(sot, "Sloop", picks) == ("🏴‍☠️", "🏴‍☠️")
+
+
+async def test_emoji_storage(db):
+    await db.set_crew_emoji(10, "sot", "Galleon", standard="🚢")
+    await db.set_crew_emoji(10, "sot", "Galleon", server="<:galleon:123456789012345678>")
+    assert await db.crew_emoji(10) == {("sot", "Galleon"): ("🚢", "<:galleon:123456789012345678>")}
+    await db.set_crew_emoji(10, "sot", "Galleon", standard=None, server=None)
+    assert await db.crew_emoji(10) == {}
+
+
+async def test_named_sessions(db):
+    from plunderbot.crew_logic import clean_title
+    assert clean_title("  Fort   Night\n with `the` crew ") == "Fort Night with 'the' crew"
+    assert clean_title("   ") is None and len(clean_title("x" * 200)) == 60
+    sot = games.get("sot")
+    assert voice_channel_name(sot, "Galleon", "Boxer", None, "Fort Night") == "🚢 | Fort Night"
+    crew = await db.create_crew(guild_id=10, channel_id=20, captain_id=1, game_key="sot", size_label="Galleon",
+                                capacity=4, activity=None, note=None, created_at=iso(T0),
+                                expires_at=iso(T0 + timedelta(hours=1)), title="Fort Night")
+    embed = render_card(crew, sot)
+    assert embed.title == "🚢 Fort Night" and "Sea of Thieves: Galleon" in embed.description
+    crew = await db.update_crew(crew.id, title=None)
+    assert render_card(crew, sot).title == "🚢 Sea of Thieves: Galleon"

@@ -91,6 +91,21 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (crew_id, user_id)
     );
     """,
+    # 4: per-game (and per-size) emoji for crew cards and voice channels
+    """
+    CREATE TABLE crew_emoji (
+        guild_id       INTEGER NOT NULL,
+        game_key       TEXT NOT NULL,
+        size_label     TEXT NOT NULL DEFAULT '',  -- '' = every size of the game
+        standard_emoji TEXT,                      -- used in channel names (and cards)
+        server_emoji   TEXT,                      -- <:name:id>, cards only
+        PRIMARY KEY (guild_id, game_key, size_label)
+    );
+    """,
+    # 5: a name the captain gives the session ("Boxer's Fort Night")
+    """
+    ALTER TABLE crews ADD COLUMN title TEXT;
+    """,
 ]
 
 
@@ -132,6 +147,7 @@ class Crew:
     expires_at: str
     sailed_at: str | None
     ended_at: str | None
+    title: str | None = None
     members: list[int] = field(default_factory=list)  # join order, captain first
 
     @property
@@ -144,7 +160,7 @@ class Crew:
 
 
 _CREW_COLUMNS = {"message_id", "status", "voice_channel_id", "voice_empty_since", "voice_occupied",
-                 "sailed_at", "ended_at"}
+                 "sailed_at", "ended_at", "title"}
 
 
 class Database:
@@ -282,12 +298,12 @@ class Database:
     # ------------------------------------------------------------ crews
     async def create_crew(self, *, guild_id: int, channel_id: int, captain_id: int, game_key: str,
                           size_label: str, capacity: int, activity: str | None, note: str | None,
-                          created_at: str, expires_at: str) -> Crew:
+                          created_at: str, expires_at: str, title: str | None = None) -> Crew:
         cur = await self.conn.execute(
             "INSERT INTO crews (guild_id, channel_id, captain_id, game_key, size_label, capacity, activity, "
-            "note, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "note, created_at, expires_at, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (guild_id, channel_id, captain_id, game_key, size_label, capacity, activity, note,
-             created_at, expires_at))
+             created_at, expires_at, title))
         crew_id = cur.lastrowid
         await self.conn.execute("INSERT INTO crew_members (crew_id, user_id, joined_at) VALUES (?, ?, ?)",
                                 (crew_id, captain_id, created_at))
@@ -351,3 +367,28 @@ class Database:
                                       (crew_id, user_id))
         await self.conn.commit()
         return cur.rowcount > 0
+
+    # ------------------------------------------------------------ crew emoji
+    async def crew_emoji(self, guild_id: int) -> dict[tuple[str, str], tuple[str | None, str | None]]:
+        rows = await (await self.conn.execute(
+            "SELECT game_key, size_label, standard_emoji, server_emoji FROM crew_emoji WHERE guild_id = ?",
+            (guild_id,))).fetchall()
+        return {(r["game_key"], r["size_label"]): (r["standard_emoji"], r["server_emoji"]) for r in rows}
+
+    async def set_crew_emoji(self, guild_id: int, game_key: str, size_label: str, *,
+                             standard: str | None = ..., server: str | None = ...) -> None:
+        """Set either kind (pass None to clear it); leave the other kind as it was."""
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO crew_emoji (guild_id, game_key, size_label) VALUES (?, ?, ?)",
+            (guild_id, game_key, size_label))
+        if standard is not ...:
+            await self.conn.execute(
+                "UPDATE crew_emoji SET standard_emoji = ? WHERE guild_id = ? AND game_key = ? AND size_label = ?",
+                (standard, guild_id, game_key, size_label))
+        if server is not ...:
+            await self.conn.execute(
+                "UPDATE crew_emoji SET server_emoji = ? WHERE guild_id = ? AND game_key = ? AND size_label = ?",
+                (server, guild_id, game_key, size_label))
+        await self.conn.execute(
+            "DELETE FROM crew_emoji WHERE standard_emoji IS NULL AND server_emoji IS NULL")
+        await self.conn.commit()

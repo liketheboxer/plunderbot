@@ -151,6 +151,9 @@ LINES: dict[str, list[str]] = {
     "crew_cant_post": [
         "{cuss} I can't post a crew card here. A Quartermaster needs to give me Send Messages and Embed Links in this channel.",
     ],
+    "crew_renamed": [
+        "Splendid name! The card's updated, and the voice channel follows as soon as Discord lets me.",
+    ],
     "crew_none": [
         "No crews are mustering right now. Start one with `/crew start`!",
     ],

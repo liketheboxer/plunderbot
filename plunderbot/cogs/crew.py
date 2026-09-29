@@ -10,8 +10,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import games, voice
-from ..crew_logic import (PING_COOLDOWN, expired, iso, now_utc, render_card, voice_channel_name,
+from .. import crew_emoji, games, voice
+from ..crew_logic import (PING_COOLDOWN, clean_title, expired, iso, now_utc, render_card, voice_channel_name,
                           voice_cleanup_due)
 from ..db import Crew
 
@@ -70,7 +70,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
     def __init__(self, bot):
         self.bot = bot
         self.lock = asyncio.Lock()  # serialises every crew change
-        self.last_ping: dict[tuple[int, str], object] = {}  # (guild, game) -> when its role was last pinged
+        self.last_ping: dict[tuple[int, str], object] = {}
+        self._background: set[asyncio.Task] = set()  # (guild, game) -> when its role was last pinged
         super().__init__()
 
     async def cog_load(self) -> None:
@@ -84,11 +85,13 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
     # ------------------------------------------------------------ commands
     @app_commands.command(name="start", description="Post a crew call for a game")
     @app_commands.describe(game="Which game", size="Crew size (depends on the game)",
-                           activity="What you're planning (depends on the game)", note="Anything else crewmates should know")
+                           activity="What you're planning (depends on the game)", note="Anything else crewmates should know",
+                           name="Name the session (also names the voice channel)")
     @app_commands.choices(game=GAME_CHOICES)
     async def start(self, interaction: discord.Interaction, game: app_commands.Choice[str],
                     size: str | None = None, activity: str | None = None,
-                    note: app_commands.Range[str, 1, 200] | None = None) -> None:
+                    note: app_commands.Range[str, 1, 200] | None = None,
+                    name: app_commands.Range[str, 1, 60] | None = None) -> None:
         profile = games.get(game.value)
         crew_size = profile.size(size)
         if crew_size is None:
@@ -118,7 +121,7 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             crew = await self.bot.db.create_crew(
                 guild_id=interaction.guild_id, channel_id=channel.id, captain_id=interaction.user.id,
                 game_key=profile.key, size_label=crew_size.label, capacity=crew_size.capacity,
-                activity=tag, note=note, created_at=iso(now),
+                activity=tag, note=note, created_at=iso(now), title=clean_title(name),
                 expires_at=iso(now + timedelta(minutes=settings.crew_expire_minutes)))
         await interaction.response.send_message(
             voice.say("hangout_started" if profile.open_ended else "crew_started"), ephemeral=True)
@@ -134,7 +137,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             text += "\n" + voice.say("crew_ping", role=role.mention)
             mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role])
         try:
-            message = await channel.send(text, embed=render_card(crew, profile), view=card_view(crew),
+            _, card_emoji = await self.emoji_for(interaction.guild_id, profile, crew.size_label)
+            message = await channel.send(text, embed=render_card(crew, profile, card_emoji), view=card_view(crew),
                                          allowed_mentions=mentions)
         except discord.HTTPException as e:
             log.warning("Couldn't post the card for crew %s: %s", crew.id, e)
@@ -165,6 +169,34 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             return
         await interaction.response.send_message(voice.say("crew_closed"), ephemeral=True)
         await self.end(interaction.guild, crew.id, "closed")
+
+    @app_commands.command(name="rename", description="Rename the session you're captaining (and its voice channel)")
+    @app_commands.describe(name="The new name; leave empty to go back to the default")
+    async def rename(self, interaction: discord.Interaction,
+                     name: app_commands.Range[str, 1, 60] | None = None) -> None:
+        crew = await self.bot.db.active_crew_led_by(interaction.guild_id, interaction.user.id)
+        if crew is None:
+            await interaction.response.send_message(voice.say("crew_none"), ephemeral=True)
+            return
+        crew = await self.bot.db.update_crew(crew.id, title=clean_title(name))
+        await interaction.response.send_message(voice.say("crew_renamed"), ephemeral=True)
+        await self.refresh_card(interaction.guild, crew)
+        vc = interaction.guild.get_channel(crew.voice_channel_id) if crew.voice_channel_id else None
+        if vc is not None:
+            profile = games.get(crew.game_key)
+            channel_emoji, _ = await self.emoji_for(interaction.guild_id, profile, crew.size_label)
+            new_name = voice_channel_name(profile, crew.size_label, interaction.user.display_name,
+                                          channel_emoji, crew.title)
+            # Discord allows two channel renames per ten minutes, so don't hold anything up waiting.
+            task = asyncio.create_task(self._rename_channel(vc, new_name))
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
+
+    async def _rename_channel(self, vc, new_name: str) -> None:
+        try:
+            await vc.edit(name=new_name, reason="Crew Call renamed by its captain")
+        except discord.HTTPException as e:
+            log.warning("Couldn't rename voice channel %s: %s", vc.id, e)
 
     @app_commands.command(name="list", description="Crews mustering or sailing right now")
     async def list_crews(self, interaction: discord.Interaction) -> None:
@@ -240,6 +272,10 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
         elif follow_up == "refresh":
             await self.refresh_card(interaction.guild, crew)
 
+    async def emoji_for(self, guild_id: int, profile, size_label: str) -> tuple[str, str]:
+        """(channel emoji, card emoji) for this game and size on this server."""
+        return crew_emoji.resolve(profile, size_label, await self.bot.db.crew_emoji(guild_id))
+
     # ------------------------------------------------------------ state changes
     async def sail(self, guild: discord.Guild, crew_id: int) -> None:
         async with self.lock:
@@ -254,7 +290,9 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
         if not isinstance(category, discord.CategoryChannel):
             category = getattr(card_channel, "category", None)
         captain = guild.get_member(crew.captain_id)
-        name = voice_channel_name(profile, crew.size_label, captain.display_name if captain else "Captain")
+        channel_emoji, _ = await self.emoji_for(guild.id, profile, crew.size_label)
+        name = voice_channel_name(profile, crew.size_label, captain.display_name if captain else "Captain",
+                                  channel_emoji, crew.title)
         vc = None
         try:
             # No user limit: other members often drop in to hang out and watch the stream.
@@ -318,7 +356,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
         if channel is None or profile is None:
             return
         try:
-            await channel.get_partial_message(crew.message_id).edit(embed=render_card(crew, profile),
+            _, card_emoji = await self.emoji_for(guild.id, profile, crew.size_label)
+            await channel.get_partial_message(crew.message_id).edit(embed=render_card(crew, profile, card_emoji),
                                                                     view=card_view(crew))
         except discord.NotFound:
             pass  # someone deleted the card; the crew still runs its course

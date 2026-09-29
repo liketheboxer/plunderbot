@@ -13,7 +13,8 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/birthday mine` | Everyone | See what PlunderBot has for you |
 | `/birthday remove` | Everyone | Take your birthday off the ledger |
 | `/birthday upcoming` | Everyone | The next 10 birthdays (shows names, pings nobody) |
-| `/crew start` | Everyone | Post a crew call: pick the game, then its crew size and activity from the suggestions, plus an optional note |
+| `/crew start` | Everyone | Post a crew call: pick the game, then its crew size and activity from the suggestions, plus an optional note and session name |
+| `/crew rename` | Captain | Rename your session and its voice channel ("⛵ | Fort Night"); leave empty for the default |
 | `/crew close` | Captain | Close your crew call and its voice channel |
 | `/crew list` | Everyone | Crews mustering or sailing right now |
 | `/admin settings` | Manage Server | Show this server's settings |
@@ -26,12 +27,14 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin crew cleanup` | Manage Server | Minutes an empty crew voice channel waits before it's removed (default 5; always at least 15 before anyone joins) |
 | `/admin crew expire` | Manage Server | Minutes before an unfilled crew call closes (default 60) |
 | `/admin crew autopings` | Manage Server | Match every game to its ping role by name (ignores case, spaces and punctuation); with `create_missing:True`, create mentionable, permission-free roles for games that have none |
+| `/admin crew emoji` | Manage Server | Emoji for a game's crew cards and voice channels, for every size or one size (e.g. separate Sloop, Brigantine and Galleon emoji). Standard emoji or server emoji; `reset` restores the default |
 | `/admin crew pingrole` | Manage Server | Opt-in role pinged when a crew call opens for a game (at most every 15 minutes per game) |
 
 ### How Crew Call works
 
 - The card lists the seats and has **Join**, **Leave**, **Set Sail** and **Close** buttons. Buttons keep working after PlunderBot restarts.
-- A full crew sets sail on its own; the captain can sail early. Sailing opens a voice channel with no user limit (spectators welcome) and pings the crew with it.
+- A full crew sets sail on its own; the captain can sail early. Sailing opens a voice channel with no user limit (spectators welcome) and pings the crew with it. Channels follow the server's style: "⛵ | Boxer's Sloop", "🪂 | Boxer's Fortnite Squad".
+- Discord only allows standard emoji in channel names. A server emoji picked with `/admin crew emoji` shows on the crew card; the channel keeps the standard one.
 - An empty crew voice channel is removed after the cleanup time. Unsailed calls close at the expiry time.
 - One active crew per captain. Only the captain can sail; the captain or a mod (Manage Channels) can close. Crew calls can't be started in threads.
 - The 15 game profiles (crew sizes and activity tags) live in `plunderbot/games.py`.

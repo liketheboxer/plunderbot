@@ -34,8 +34,8 @@ async def test_command_tree(bot):
     assert isinstance(admin, app_commands.Group)
     assert admin.guild_only and admin.default_permissions.manage_guild
     assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew"}
-    assert {c.name for c in admin.get_command("crew").commands} == {"category", "cleanup", "expire", "pingrole", "autopings"}
-    assert {c.name for c in top["crew"].commands} == {"start", "close", "list"}
+    assert {c.name for c in admin.get_command("crew").commands} == {"category", "cleanup", "expire", "pingrole", "autopings", "emoji"}
+    assert {c.name for c in top["crew"].commands} == {"start", "close", "list", "rename"}
     bday_admin = admin.get_command("birthdays")
     assert {c.name for c in bday_admin.commands} == {"channel", "hour", "role", "off"}
     birthday = top["birthday"]

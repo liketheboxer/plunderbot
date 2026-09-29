@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from .db import Crew
+from .crew_emoji import channel_subject, default_for
 from .games import GameProfile
 
 # A new voice channel gets this long for the crew to arrive before an empty channel counts.
@@ -62,16 +63,28 @@ def voice_cleanup_due(crew: Crew, members_in_voice: int, now: datetime, cleanup_
     return now - since >= wait
 
 
-def voice_channel_name(profile: GameProfile, size_label: str, captain_name: str) -> str:
-    if profile.open_ended:
-        return f"{captain_name}'s {profile.name}"[:100]
-    base = f"{profile.short} · {captain_name}'s {size_label}"
-    return base[:100]
+def clean_title(text: str | None) -> str | None:
+    """A captain's session name: single spaces, no line breaks or backticks, at most 60 characters."""
+    if not text:
+        return None
+    cleaned = " ".join(text.replace("`", "'").split())[:60].strip()
+    return cleaned or None
 
 
-def render_card(crew: Crew, profile: GameProfile) -> discord.Embed:
+def voice_channel_name(profile: GameProfile, size_label: str, captain_name: str, emoji: str | None = None,
+                       title: str | None = None) -> str:
+    """In the server's style: "⛵ | Boxer's Sloop", "🪖 | Boxer's Helldivers", or "⛵ | Fort Night"
+    when the captain named the session."""
+    emoji = emoji or default_for(profile, size_label)
+    if title:
+        return f"{emoji} | {title}"[:100]
+    return f"{emoji} | {captain_name}'s {channel_subject(profile, size_label)}"[:100]
+
+
+def render_card(crew: Crew, profile: GameProfile, emoji: str | None = None) -> discord.Embed:
+    emoji = emoji or default_for(profile, crew.size_label)
     if profile.open_ended:
-        return _render_hangout(crew, profile)
+        return _render_hangout(crew, profile, emoji)
     seats = []
     for i in range(crew.capacity):
         if i < len(crew.members):
@@ -79,8 +92,10 @@ def render_card(crew: Crew, profile: GameProfile) -> discord.Embed:
             seats.append(f"{i + 1}. <@{crew.members[i]}>{role}")
         else:
             seats.append(f"{i + 1}. *open seat*")
-    title = f"{profile.name}: {crew.size_label}"
+    title = f"{emoji} {crew.title}" if crew.title else f"{emoji} {profile.name}: {crew.size_label}"
     embed = discord.Embed(title=title, colour=STATUS_COLOUR.get(crew.status, discord.Colour.default()))
+    if crew.title:
+        embed.description = f"{profile.name}: {crew.size_label}"
     embed.add_field(name="Status", value=STATUS_LABEL.get(crew.status, crew.status), inline=True)
     embed.add_field(name="Crew", value=f"{len(crew.members)} / {crew.capacity}", inline=True)
     if crew.activity:
@@ -99,9 +114,9 @@ def render_card(crew: Crew, profile: GameProfile) -> discord.Embed:
     return embed
 
 
-def _render_hangout(crew: Crew, profile: GameProfile) -> discord.Embed:
+def _render_hangout(crew: Crew, profile: GameProfile, emoji: str) -> discord.Embed:
     """A hangout has no seats: just who's aboard, however many that is."""
-    embed = discord.Embed(title=profile.name, colour=STATUS_COLOUR.get(crew.status, discord.Colour.default()))
+    embed = discord.Embed(title=f"{emoji} {crew.title or profile.name}", colour=STATUS_COLOUR.get(crew.status, discord.Colour.default()))
     embed.add_field(name="Status", value="Open" if crew.active else STATUS_LABEL.get(crew.status, crew.status),
                     inline=True)
     embed.add_field(name="Aboard", value=str(len(crew.members)), inline=True)
