@@ -184,6 +184,57 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (guild_id, user_id)
     );
     """,
+    # 11: a picture on voyage and crew cards (a file name under /data/images)
+    """
+    ALTER TABLE voyages ADD COLUMN image TEXT;
+    ALTER TABLE crews ADD COLUMN image TEXT;
+    ALTER TABLE voyages ADD COLUMN ping_role TEXT NOT NULL DEFAULT 'posted';
+    """,
+    # 12: Colours (role menus), Notice Board pages, the Game Index
+    """
+    CREATE TABLE role_menus (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id    INTEGER NOT NULL,
+        key         TEXT NOT NULL,
+        title       TEXT NOT NULL,
+        description TEXT,
+        mode        TEXT NOT NULL DEFAULT 'multi',
+        channel_id  INTEGER,
+        message_id  INTEGER,
+        onboarding  INTEGER NOT NULL DEFAULT 0,
+        position    INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (guild_id, key)
+    );
+    CREATE TABLE role_menu_options (
+        menu_id     INTEGER NOT NULL REFERENCES role_menus(id) ON DELETE CASCADE,
+        role_id     INTEGER NOT NULL,
+        emoji       TEXT,
+        label       TEXT,
+        description TEXT,
+        position    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (menu_id, role_id)
+    );
+    CREATE TABLE pages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id    INTEGER NOT NULL,
+        key         TEXT NOT NULL,
+        title       TEXT NOT NULL,
+        kind        TEXT NOT NULL DEFAULT 'custom',
+        channel_id  INTEGER,
+        message_ids TEXT NOT NULL DEFAULT '',
+        UNIQUE (guild_id, key)
+    );
+    CREATE TABLE page_sections (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        page_id  INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        heading  TEXT,
+        body     TEXT,
+        colour   INTEGER,
+        image    TEXT
+    );
+    ALTER TABLE guild_settings ADD COLUMN forum_channel_id INTEGER;
+    """,
 ]
 
 
@@ -211,6 +262,58 @@ class GuildSettings:
     reject_emoji: str | None = None
     gangplank_remind_days: int = 3
     gangplank_kick_days: int = 7
+    forum_channel_id: int | None = None
+
+
+@dataclass
+class MenuOption:
+    role_id: int
+    emoji: str | None = None
+    label: str | None = None
+    description: str | None = None
+    position: int = 0
+
+
+@dataclass
+class RoleMenu:
+    id: int
+    guild_id: int
+    key: str
+    title: str
+    description: str | None = None
+    mode: str = "multi"  # multi: any number; single: one at most
+    channel_id: int | None = None
+    message_id: int | None = None
+    onboarding: int = 0  # offered to newcomers when they're let aboard
+    position: int = 0
+    options: list[MenuOption] = field(default_factory=list)
+
+
+@dataclass
+class PageSection:
+    id: int
+    page_id: int
+    position: int
+    heading: str | None = None
+    body: str | None = None
+    colour: int | None = None
+    image: str | None = None
+
+
+@dataclass
+class Page:
+    id: int
+    guild_id: int
+    key: str
+    title: str
+    kind: str = "custom"  # custom | game_index
+    channel_id: int | None = None
+    message_ids: str = ""
+    sections: list[PageSection] = field(default_factory=list)
+
+    @property
+    def messages(self) -> list[int]:
+        return [int(x) for x in self.message_ids.split(",") if x]
 
 
 @dataclass
@@ -224,7 +327,7 @@ class Boarding:
     reminded_at: str | None = None
 
 
-_SETTING_COLUMNS = {"gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
+_SETTING_COLUMNS = {"forum_channel_id", "gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
                     "rules_channel_id", "orientation_channel_id", "gangplank_alert_channel_id",
                     "approve_emoji", "reject_emoji", "gangplank_remind_days", "gangplank_kick_days",
                     "timezone", "birthday_channel_id", "birthday_hour", "birthday_role_id",
@@ -254,6 +357,8 @@ class Voyage:
     event_id: int | None
     crew_id: int | None
     created_at: str
+    image: str | None = None
+    ping_role: str = "posted"  # off | posted | reminders: when the game's ping role is tagged
 
     @property
     def reminder_minutes(self) -> list[int]:
@@ -266,7 +371,7 @@ class Voyage:
 
 _VOYAGE_COLUMNS = {"channel_id", "message_id", "title", "description", "game_key", "size_label", "capacity",
                    "starts_at", "duration_min", "reminders", "reminders_sent", "repeat", "series_id", "status",
-                   "event_id", "crew_id"}
+                   "event_id", "crew_id", "image", "ping_role"}
 
 
 @dataclass
@@ -290,6 +395,7 @@ class Crew:
     sailed_at: str | None
     ended_at: str | None
     title: str | None = None
+    image: str | None = None
     members: list[int] = field(default_factory=list)  # join order, captain first
 
     @property
@@ -302,7 +408,7 @@ class Crew:
 
 
 _CREW_COLUMNS = {"message_id", "status", "voice_channel_id", "voice_empty_since", "voice_occupied",
-                 "sailed_at", "ended_at", "title"}
+                 "sailed_at", "ended_at", "title", "image"}
 
 
 class Database:
@@ -440,12 +546,13 @@ class Database:
     # ------------------------------------------------------------ crews
     async def create_crew(self, *, guild_id: int, channel_id: int, captain_id: int, game_key: str,
                           size_label: str, capacity: int, activity: str | None, note: str | None,
-                          created_at: str, expires_at: str, title: str | None = None) -> Crew:
+                          created_at: str, expires_at: str, title: str | None = None,
+                          image: str | None = None) -> Crew:
         cur = await self.conn.execute(
             "INSERT INTO crews (guild_id, channel_id, captain_id, game_key, size_label, capacity, activity, "
-            "note, created_at, expires_at, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "note, created_at, expires_at, title, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (guild_id, channel_id, captain_id, game_key, size_label, capacity, activity, note,
-             created_at, expires_at, title))
+             created_at, expires_at, title, image))
         crew_id = cur.lastrowid
         await self.conn.execute("INSERT INTO crew_members (crew_id, user_id, joined_at) VALUES (?, ?, ?)",
                                 (crew_id, captain_id, created_at))
@@ -674,3 +781,168 @@ class Database:
                                       (guild_id, user_id))
         await self.conn.commit()
         return cur.rowcount > 0
+
+    # ------------------------------------------------------------ role menus (Colours)
+    async def _menu(self, row) -> RoleMenu:
+        menu = RoleMenu(**{k: row[k] for k in row.keys()})
+        opts = await (await self.conn.execute(
+            "SELECT role_id, emoji, label, description, position FROM role_menu_options WHERE menu_id = ? "
+            "ORDER BY position, rowid", (menu.id,))).fetchall()
+        menu.options = [MenuOption(**{k: o[k] for k in o.keys()}) for o in opts]
+        return menu
+
+    async def create_menu(self, guild_id: int, key: str, title: str, description: str | None, mode: str) -> RoleMenu:
+        row = await (await self.conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 AS p FROM role_menus WHERE guild_id = ?", (guild_id,))).fetchone()
+        cur = await self.conn.execute(
+            "INSERT INTO role_menus (guild_id, key, title, description, mode, position) VALUES (?, ?, ?, ?, ?, ?)",
+            (guild_id, key, title, description, mode, row["p"]))
+        await self.conn.commit()
+        return await self.get_menu(cur.lastrowid)
+
+    async def get_menu(self, menu_id: int) -> RoleMenu | None:
+        row = await (await self.conn.execute("SELECT * FROM role_menus WHERE id = ?", (menu_id,))).fetchone()
+        return await self._menu(row) if row else None
+
+    async def menu_by_key(self, guild_id: int, key: str) -> RoleMenu | None:
+        row = await (await self.conn.execute(
+            "SELECT * FROM role_menus WHERE guild_id = ? AND key = ?", (guild_id, key))).fetchone()
+        return await self._menu(row) if row else None
+
+    async def menus(self, guild_id: int) -> list[RoleMenu]:
+        rows = await (await self.conn.execute(
+            "SELECT * FROM role_menus WHERE guild_id = ? ORDER BY position, id", (guild_id,))).fetchall()
+        return [await self._menu(r) for r in rows]
+
+    async def update_menu(self, menu_id: int, **values) -> RoleMenu | None:
+        bad = set(values) - {"key", "title", "description", "mode", "channel_id", "message_id", "onboarding",
+                             "position"}
+        if bad:
+            raise ValueError(f"Unknown menu fields: {', '.join(sorted(bad))}")
+        cols = ", ".join(f"{k} = ?" for k in values)
+        await self.conn.execute(f"UPDATE role_menus SET {cols} WHERE id = ?", (*values.values(), menu_id))
+        await self.conn.commit()
+        return await self.get_menu(menu_id)
+
+    async def delete_menu(self, menu_id: int) -> None:
+        await self.conn.execute("DELETE FROM role_menu_options WHERE menu_id = ?", (menu_id,))
+        await self.conn.execute("DELETE FROM role_menus WHERE id = ?", (menu_id,))
+        await self.conn.commit()
+
+    async def set_menu_option(self, menu_id: int, role_id: int, emoji: str | None, label: str | None,
+                              description: str | None) -> None:
+        row = await (await self.conn.execute(
+            "SELECT position FROM role_menu_options WHERE menu_id = ? AND role_id = ?", (menu_id, role_id))).fetchone()
+        if row is None:
+            nxt = await (await self.conn.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 AS p FROM role_menu_options WHERE menu_id = ?",
+                (menu_id,))).fetchone()
+            position = nxt["p"]
+        else:
+            position = row["position"]
+        await self.conn.execute(
+            "INSERT INTO role_menu_options (menu_id, role_id, emoji, label, description, position) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (menu_id, role_id) DO UPDATE SET emoji = excluded.emoji, "
+            "label = excluded.label, description = excluded.description",
+            (menu_id, role_id, emoji, label, description, position))
+        await self.conn.commit()
+
+    async def remove_menu_option(self, menu_id: int, role_id: int) -> bool:
+        cur = await self.conn.execute("DELETE FROM role_menu_options WHERE menu_id = ? AND role_id = ?",
+                                      (menu_id, role_id))
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    async def move_menu_option(self, menu_id: int, role_id: int, position: int) -> None:
+        menu = await self.get_menu(menu_id)
+        ids = [o.role_id for o in menu.options if o.role_id != role_id]
+        ids.insert(max(0, min(position - 1, len(ids))), role_id)
+        for i, rid in enumerate(ids, start=1):
+            await self.conn.execute("UPDATE role_menu_options SET position = ? WHERE menu_id = ? AND role_id = ?",
+                                    (i, menu_id, rid))
+        await self.conn.commit()
+
+    # ------------------------------------------------------------ Notice Board pages
+    async def _page(self, row) -> Page:
+        page = Page(**{k: row[k] for k in row.keys()})
+        secs = await (await self.conn.execute(
+            "SELECT * FROM page_sections WHERE page_id = ? ORDER BY position, id", (page.id,))).fetchall()
+        page.sections = [PageSection(**{k: r[k] for k in r.keys()}) for r in secs]
+        return page
+
+    async def create_page(self, guild_id: int, key: str, title: str, kind: str = "custom") -> Page:
+        cur = await self.conn.execute("INSERT INTO pages (guild_id, key, title, kind) VALUES (?, ?, ?, ?)",
+                                      (guild_id, key, title, kind))
+        await self.conn.commit()
+        return await self.get_page(cur.lastrowid)
+
+    async def get_page(self, page_id: int) -> Page | None:
+        row = await (await self.conn.execute("SELECT * FROM pages WHERE id = ?", (page_id,))).fetchone()
+        return await self._page(row) if row else None
+
+    async def page_by_key(self, guild_id: int, key: str) -> Page | None:
+        row = await (await self.conn.execute(
+            "SELECT * FROM pages WHERE guild_id = ? AND key = ?", (guild_id, key))).fetchone()
+        return await self._page(row) if row else None
+
+    async def pages(self, guild_id: int) -> list[Page]:
+        rows = await (await self.conn.execute(
+            "SELECT * FROM pages WHERE guild_id = ? ORDER BY id", (guild_id,))).fetchall()
+        return [await self._page(r) for r in rows]
+
+    async def update_page(self, page_id: int, **values) -> Page | None:
+        bad = set(values) - {"key", "title", "channel_id", "message_ids"}
+        if bad:
+            raise ValueError(f"Unknown page fields: {', '.join(sorted(bad))}")
+        cols = ", ".join(f"{k} = ?" for k in values)
+        await self.conn.execute(f"UPDATE pages SET {cols} WHERE id = ?", (*values.values(), page_id))
+        await self.conn.commit()
+        return await self.get_page(page_id)
+
+    async def delete_page(self, page_id: int) -> None:
+        await self.conn.execute("DELETE FROM page_sections WHERE page_id = ?", (page_id,))
+        await self.conn.execute("DELETE FROM pages WHERE id = ?", (page_id,))
+        await self.conn.commit()
+
+    async def add_section(self, page_id: int, heading: str | None, body: str | None, colour: int | None = None,
+                          image: str | None = None, position: int | None = None) -> PageSection:
+        page = await self.get_page(page_id)
+        count = len(page.sections)
+        position = count + 1 if position is None else max(1, min(position, count + 1))
+        await self.conn.execute("UPDATE page_sections SET position = position + 1 WHERE page_id = ? AND position >= ?",
+                                (page_id, position))
+        cur = await self.conn.execute(
+            "INSERT INTO page_sections (page_id, position, heading, body, colour, image) VALUES (?, ?, ?, ?, ?, ?)",
+            (page_id, position, heading, body, colour, image))
+        await self.conn.commit()
+        await self._renumber(page_id)
+        row = await (await self.conn.execute("SELECT * FROM page_sections WHERE id = ?", (cur.lastrowid,))).fetchone()
+        return PageSection(**{k: row[k] for k in row.keys()})
+
+    async def update_section(self, section_id: int, **values) -> None:
+        bad = set(values) - {"heading", "body", "colour", "image"}
+        if bad:
+            raise ValueError(f"Unknown section fields: {', '.join(sorted(bad))}")
+        cols = ", ".join(f"{k} = ?" for k in values)
+        await self.conn.execute(f"UPDATE page_sections SET {cols} WHERE id = ?", (*values.values(), section_id))
+        await self.conn.commit()
+
+    async def remove_section(self, page_id: int, section_id: int) -> None:
+        await self.conn.execute("DELETE FROM page_sections WHERE id = ? AND page_id = ?", (section_id, page_id))
+        await self.conn.commit()
+        await self._renumber(page_id)
+
+    async def move_section(self, page_id: int, section_id: int, position: int) -> None:
+        page = await self.get_page(page_id)
+        ids = [s.id for s in page.sections if s.id != section_id]
+        ids.insert(max(0, min(position - 1, len(ids))), section_id)
+        for i, sid in enumerate(ids, start=1):
+            await self.conn.execute("UPDATE page_sections SET position = ? WHERE id = ?", (i, sid))
+        await self.conn.commit()
+
+    async def _renumber(self, page_id: int) -> None:
+        rows = await (await self.conn.execute(
+            "SELECT id FROM page_sections WHERE page_id = ? ORDER BY position, id", (page_id,))).fetchall()
+        for i, r in enumerate(rows, start=1):
+            await self.conn.execute("UPDATE page_sections SET position = ? WHERE id = ?", (i, r["id"]))
+        await self.conn.commit()

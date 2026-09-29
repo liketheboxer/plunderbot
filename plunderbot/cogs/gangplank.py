@@ -184,16 +184,36 @@ class Gangplank(commands.Cog):
         if decision == "approve":
             channel = guild.get_channel(s.intro_channel_id)
             if channel is not None:
-                text = voice.say("gangplank_approved", member=member.mention,
+                items = await self.onboarding_items(guild)
+                text = voice.say("gangplank_approved_buttons" if items else "gangplank_approved",
+                                 member=member.mention,
                                  orientation=_channel_ref(s.orientation_channel_id, "the orientation channel"))
+                extra = {}
+                if items:
+                    view = discord.ui.View(timeout=None)
+                    for item in items[:25]:
+                        view.add_item(item)
+                    extra["view"] = view
                 try:
-                    await channel.send(text, allowed_mentions=discord.AllowedMentions(users=[member]))
+                    await channel.send(text, allowed_mentions=discord.AllowedMentions(users=[member]), **extra)
                 except discord.HTTPException as e:
                     log.warning("Couldn't post the welcome-aboard for %s: %s", member.id, e)
             await self.alert(guild, s, f"{member.mention} was let aboard by {by.mention}.")
             return "approved"
         await self.alert(guild, s, f"{member} ({member.id}) was turned away by {by.mention}.")
         return "rejected"
+
+    async def onboarding_items(self, guild: discord.Guild) -> list:
+        """Role-menu and follow-a-game buttons for the welcome-aboard message."""
+        items = []
+        for name in ("Colours", "Noticeboard"):
+            cog = self.bot.get_cog(name)
+            if cog is not None:
+                try:
+                    items.extend(await cog.onboarding_items(guild))
+                except Exception:
+                    log.exception("Couldn't gather onboarding buttons from %s", name)
+        return items
 
     # ------------------------------------------------------------ the clock
     @tasks.loop(minutes=5)

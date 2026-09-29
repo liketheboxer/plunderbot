@@ -101,3 +101,37 @@ def decide(current: tuple[str, str] | None, region_zone: str | None) -> tuple[st
     if current is not None and current[0] == region_zone:
         return None
     return ("set", region_zone)
+
+
+# Regions too broad for one zone: when a member picks one, they're offered these to choose from.
+BROAD_ZONES: dict[str, list[tuple[str, str]]] = {
+    "asia": [
+        ("Gulf (Dubai)", "Asia/Dubai"),
+        ("Pakistan", "Asia/Karachi"),
+        ("India", "Asia/Kolkata"),
+        ("Bangladesh", "Asia/Dhaka"),
+        ("Thailand, Vietnam, Indonesia (Jakarta)", "Asia/Bangkok"),
+        ("China, Singapore, Philippines, Malaysia", "Asia/Singapore"),
+        ("Japan, Korea", "Asia/Tokyo"),
+    ],
+    "south america": [
+        ("Mexico (Central)", "America/Mexico_City"),
+        ("Central America", "America/Guatemala"),
+        ("Colombia, Peru, Ecuador", "America/Bogota"),
+        ("Venezuela, Bolivia", "America/Caracas"),
+        ("Chile", "America/Santiago"),
+        ("Argentina, Uruguay", "America/Argentina/Buenos_Aires"),
+        ("Brazil (Brasília, São Paulo)", "America/Sao_Paulo"),
+    ],
+}
+
+
+def broad_zones_for(role_name: str) -> list[tuple[str, str]]:
+    """The zones to offer someone who picked a region role that spans several."""
+    w = normalise(role_name)
+    if _has(w, "asia", "apac"):
+        return BROAD_ZONES["asia"]
+    if _has(w, "south america", "latin america", "latam", "south and central america",
+            "central and south america", "south central america"):
+        return BROAD_ZONES["south america"]
+    return []

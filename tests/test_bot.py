@@ -31,7 +31,7 @@ async def bot(tmp_path):
 
 async def test_command_tree(bot):
     top = {c.name: c for c in bot.tree.get_commands()}
-    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage", "timezone"}
+    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage", "timezone", "colours", "noticeboard", "follow"}
     assert {c.name for c in top["voyage"].commands} == {"create", "edit", "cancel", "list"}
     admin = top["admin"]
     assert isinstance(admin, app_commands.Group)

@@ -256,3 +256,28 @@ async def test_let_aboard_by_hand_or_left(env):
     await bot.db.add_boarding(5, 7, iso(T0))
     await cog.on_member_remove(SimpleNamespace(id=7, guild=guild))
     assert await bot.db.get_boarding(5, 7) is None
+
+
+async def test_welcome_aboard_offers_role_menus(env, monkeypatch):
+    bot, cog, guild = env
+    from plunderbot.cogs.colours import MenuButton
+
+    class FakeColours:
+        async def onboarding_items(self, g):
+            return [MenuButton(3, "Choose Region Roles")]
+
+    real = bot.get_cog
+    monkeypatch.setattr(bot, "get_cog", lambda name: FakeColours() if name == "Colours" else real(name))
+    sent = []
+
+    async def send(text, **kw):
+        sent.append((text, kw))
+        return SimpleNamespace(id=1)
+
+    guild.intro.send = send
+    newbie = Member(guild, 1, guild.pending)
+    harbormaster = Member(guild, 2, guild.harbor)
+    await bot.db.add_boarding(5, 1, iso(T0))
+    await cog.on_raw_reaction_add(reaction(guild, harbormaster, 555, 1, YAR, "Yar"))
+    text, kw = sent[-1]
+    assert "buttons below" in text and kw["view"].children[0].custom_id == "colours:open:3"

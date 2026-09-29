@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import crew_emoji, games, voice
+from .. import images, crew_emoji, games, voice
 from ..crew_logic import (PING_COOLDOWN, clean_title, expired, iso, now_utc, render_card, voice_channel_name,
                           voice_cleanup_due)
 from ..db import Crew
@@ -87,12 +87,15 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
     @app_commands.command(name="start", description="Post a crew call for a game")
     @app_commands.describe(game="Which game", size="Crew size (depends on the game)",
                            activity="What you're planning (depends on the game)", note="Anything else crewmates should know",
-                           name="Name the session (also names the voice channel)")
+                           name="Name the session (also names the voice channel)",
+                           image="A picture for the crew card",
+                           notify="Tag the game's ping role (default: yes)")
     @app_commands.choices(game=GAME_CHOICES)
     async def start(self, interaction: discord.Interaction, game: app_commands.Choice[str],
                     size: str | None = None, activity: str | None = None,
                     note: app_commands.Range[str, 1, 200] | None = None,
-                    name: app_commands.Range[str, 1, 60] | None = None) -> None:
+                    name: app_commands.Range[str, 1, 60] | None = None,
+                    image: discord.Attachment | None = None, notify: bool = True) -> None:
         profile = games.get(game.value)
         crew_size = profile.size(size)
         if crew_size is None:
@@ -113,10 +116,19 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
         if not (perms.view_channel and perms.send_messages and perms.embed_links):
             await interaction.response.send_message(voice.say("crew_cant_post"), ephemeral=True)
             return
+        image_name = None
+        if image is not None:
+            await interaction.response.defer(ephemeral=True)  # fetching the picture can take a moment
+            try:
+                image_name = await images.save(image, self.bot.config.data_dir)
+            except (images.ImageError, discord.HTTPException, OSError) as e:
+                log.info("Crew picture refused: %s", e)
+                await self._say(interaction, voice.say("image_bad"))
+                return
 
         async with self.lock:
             if await self.bot.db.active_crew_led_by(interaction.guild_id, interaction.user.id):
-                await interaction.response.send_message(voice.say("crew_one_at_a_time"), ephemeral=True)
+                await self._say(interaction, voice.say("crew_one_at_a_time"))
                 return
             settings = await self.bot.db.get_settings(interaction.guild_id)
             now = now_utc()
@@ -124,14 +136,13 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
                 guild_id=interaction.guild_id, channel_id=channel.id, captain_id=interaction.user.id,
                 game_key=profile.key, size_label=crew_size.label, capacity=crew_size.capacity,
                 activity=tag, note=note, created_at=iso(now), title=clean_title(name),
-                expires_at=iso(now + timedelta(minutes=settings.crew_expire_minutes)))
-        await interaction.response.send_message(
-            voice.say("hangout_started" if profile.open_ended else "crew_started"), ephemeral=True)
+                expires_at=iso(now + timedelta(minutes=settings.crew_expire_minutes)), image=image_name)
+        await self._say(interaction, voice.say("hangout_started" if profile.open_ended else "crew_started"))
 
         key = "hangout_call" if profile.open_ended else "crew_call"
         text = voice.say(key, captain=interaction.user.mention, game=profile.name, size=crew_size.label)
         mentions = discord.AllowedMentions.none()
-        role_id = (await self.bot.db.game_ping_roles(interaction.guild_id)).get(profile.key)
+        role_id = (await self.bot.db.game_ping_roles(interaction.guild_id)).get(profile.key) if notify else None
         role = interaction.guild.get_role(role_id) if role_id else None
         last = self.last_ping.get((interaction.guild_id, profile.key))
         if role is not None and (last is None or now - last >= PING_COOLDOWN):
@@ -140,8 +151,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role])
         try:
             _, card_emoji = await self.emoji_for(interaction.guild_id, profile, crew.size_label)
-            message = await channel.send(text, embed=render_card(crew, profile, card_emoji), view=card_view(crew),
-                                         allowed_mentions=mentions)
+            message = await channel.send(text, embed=self.card_embed(crew, profile, card_emoji), view=card_view(crew),
+                                         allowed_mentions=mentions, **self.card_file(channel, crew.image))
         except discord.HTTPException as e:
             log.warning("Couldn't post the card for crew %s: %s", crew.id, e)
             await self.bot.db.update_crew(crew.id, status="closed", ended_at=iso(now_utc()))
@@ -157,6 +168,26 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             await self.sail(interaction.guild, crew.id)
 
     @staticmethod
+    async def _say(interaction: discord.Interaction, text: str) -> None:
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await interaction.response.send_message(text, ephemeral=True)
+
+    def card_embed(self, crew: Crew, profile, card_emoji: str) -> discord.Embed:
+        return images.show(render_card(crew, profile, card_emoji), crew.image, self.bot.config.data_dir)
+
+    def card_file(self, channel, image_name: str | None) -> dict:
+        """send() keyword for a card's picture, if there is one and PlunderBot may attach files there."""
+        guild = getattr(channel, "guild", None)
+        if image_name and guild is not None and hasattr(channel, "permissions_for"):
+            if not channel.permissions_for(guild.me).attach_files:
+                log.warning("No Attach Files in %s, so the card goes up without its picture", channel.id)
+                return {}
+        f = images.file_for(image_name, self.bot.config.data_dir)
+        return {"file": f} if f else {}
+
+    @staticmethod
     def crew_channel(guild: discord.Guild, settings):
         """The channel set with /admin crew channel, if it still exists."""
         if not settings.crew_channel_id:
@@ -165,7 +196,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
         return channel if isinstance(channel, discord.TextChannel) else None
 
     async def launch_for_voyage(self, guild: discord.Guild, channel, *, captain_id: int, profile, size_label: str,
-                                capacity: int, members: list[int], title: str, note: str | None) -> Crew | None:
+                                capacity: int, members: list[int], title: str, note: str | None,
+                                image: str | None = None) -> Crew | None:
         """Turn a Voyage that's starting into a crew: its Aboard list becomes the crew, a crew card goes
         up with Join/Leave for late arrivals, and it sets sail straight away (voice channel and ping)."""
         now = now_utc()
@@ -173,15 +205,16 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             crew = await self.bot.db.create_crew(
                 guild_id=guild.id, channel_id=channel.id, captain_id=captain_id, game_key=profile.key,
                 size_label=size_label, capacity=max(capacity, len(members), 1), activity=None, note=note,
-                created_at=iso(now), expires_at=iso(now + timedelta(hours=1)), title=clean_title(title))
+                created_at=iso(now), expires_at=iso(now + timedelta(hours=1)), title=clean_title(title), image=image)
             for uid in members:
                 if uid != captain_id:
                     await self.bot.db.add_crew_member(crew.id, uid, iso(now))
             crew = await self.bot.db.get_crew(crew.id)
         try:
             _, card_emoji = await self.emoji_for(guild.id, profile, crew.size_label)
-            message = await channel.send(embed=render_card(crew, profile, card_emoji), view=card_view(crew),
-                                         allowed_mentions=discord.AllowedMentions.none())
+            message = await channel.send(embed=self.card_embed(crew, profile, card_emoji), view=card_view(crew),
+                                         allowed_mentions=discord.AllowedMentions.none(),
+                                         **self.card_file(channel, crew.image))
             await self.bot.db.update_crew(crew.id, message_id=message.id)
         except discord.HTTPException as e:
             log.warning("Couldn't post the crew card for a voyage: %s", e)
@@ -400,7 +433,7 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             return
         try:
             _, card_emoji = await self.emoji_for(guild.id, profile, crew.size_label)
-            await channel.get_partial_message(crew.message_id).edit(embed=render_card(crew, profile, card_emoji),
+            await channel.get_partial_message(crew.message_id).edit(embed=self.card_embed(crew, profile, card_emoji),
                                                                     view=card_view(crew))
         except discord.NotFound:
             pass  # someone deleted the card; the crew still runs its course

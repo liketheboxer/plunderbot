@@ -18,16 +18,12 @@ from ..region_logic import guess_zone
 from ..voyage_logic import zone_from_name
 from ..crew_logic import voice_channel_name
 from ..birthday_logic import valid_timezone
+from ..discord_util import elevated
 
 _ZONES = sorted(available_timezones())
 
 
-def _elevated(p: discord.Permissions) -> bool:
-    """A role with any of these is too powerful to hand out automatically."""
-    return any((p.administrator, p.manage_guild, p.manage_roles, p.manage_channels, p.manage_messages,
-                p.manage_webhooks, p.manage_nicknames, p.manage_events, p.manage_expressions,
-                p.kick_members, p.ban_members, p.moderate_members, p.mention_everyone,
-                p.view_audit_log, p.move_members, p.mute_members, p.deafen_members))
+_elevated = elevated
 
 
 def _hour_label(hour: int) -> str:
@@ -156,15 +152,34 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
 
     # ------------------------------------------------------------ crew call
     @crew.command(name="category", description="Category for crew voice channels (leave empty: next to the card)")
-    async def crew_category(self, interaction: discord.Interaction,
-                            category: discord.CategoryChannel | None = None) -> None:
-        if category is not None and not category.permissions_for(interaction.guild.me).manage_channels:
-            await interaction.response.send_message(
-                f"I need Manage Channels in {category.name} to open voice channels there.", ephemeral=True)
-            return
-        await self.bot.db.update_settings(interaction.guild_id, crew_category_id=category.id if category else None)
-        where = category.name if category else "the same category as each crew card"
+    @app_commands.describe(category="Pick a category from the list (empty: next to the crew card)")
+    async def crew_category(self, interaction: discord.Interaction, category: str | None = None) -> None:
+        # A plain text option with our own suggestions: Discord's channel picker often won't
+        # select categories, especially ones with symbols in their names.
+        found = None
+        if category is not None:
+            wanted = category.strip()
+            for c in interaction.guild.categories:
+                if str(c.id) == wanted or c.name.lower() == wanted.lower():
+                    found = c
+                    break
+            if found is None:
+                await interaction.response.send_message(
+                    f"I can't find a category called \"{category}\". Pick one from the list.", ephemeral=True)
+                return
+            if not found.permissions_for(interaction.guild.me).manage_channels:
+                await interaction.response.send_message(
+                    f"I need Manage Channels in {found.name} to open voice channels there.", ephemeral=True)
+                return
+        await self.bot.db.update_settings(interaction.guild_id, crew_category_id=found.id if found else None)
+        where = found.name if found else "the same category as each crew card"
         await interaction.response.send_message(f"Crew voice channels will open in {where}.", ephemeral=True)
+
+    @crew_category.autocomplete("category")
+    async def crew_category_ac(self, interaction: discord.Interaction, current: str):
+        needle = current.strip().lower()
+        return [app_commands.Choice(name=c.name[:100], value=str(c.id))
+                for c in interaction.guild.categories if needle in c.name.lower()][:25]
 
     @crew.command(name="channel", description="Where every crew card goes, including voyages that set sail (empty: where it's started)")
     async def crew_channel_cmd(self, interaction: discord.Interaction,

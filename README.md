@@ -14,16 +14,19 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/birthday mine` | Everyone | See what PlunderBot has for you |
 | `/birthday remove` | Everyone | Take your birthday off the ledger |
 | `/birthday upcoming` | Everyone | The next 10 birthdays (shows names, pings nobody) |
-| `/crew start` | Everyone | Post a crew call: pick the game, then its crew size and activity from the suggestions, plus an optional note and session name |
+| `/crew start` | Everyone | Post a crew call: pick the game, then its crew size and activity from the suggestions, plus an optional note, session name, picture, and whether to tag the game's ping role (on by default) |
 | `/crew rename` | Captain | Rename your session and its voice channel ("⛵ | Fort Night"); leave empty for the default |
 | `/crew close` | Captain | Close your crew call and its voice channel |
 | `/crew list` | Everyone | Crews mustering or sailing right now |
-| `/voyage create` | Everyone | Schedule a voyage: title, date (friday, tomorrow, 10/3), time (8pm), optional game and size, seats, details, reminders (default 1 day and 1 hour before; e.g. `2d, 3h, 15m` or `none`), repeat (weekly, every 2 weeks, monthly) and length |
-| `/voyage edit` | Organizer or mod | Change the title, date, time, details, reminders or seats |
+| `/voyage create` | Everyone | Schedule a voyage: title, date (friday, tomorrow, 10/3), time (8pm), optional game and size, seats, details, reminders (default 1 day and 1 hour before; e.g. `2d, 3h, 15m` or `none`), repeat (weekly, every 2 weeks, monthly), length, a picture, and when to tag the game's ping role (when posted by default; or also at each reminder and when it sails; or never) |
+| `/voyage edit` | Organizer or mod | Change the title, date, time, details, reminders, seats, picture (or remove it) or when the game's role is tagged |
 | `/voyage cancel` | Organizer or mod | Cancel one voyage, or with `whole_series:True` a repeating series |
 | `/voyage list` | Everyone | Upcoming voyages |
 | `/admin settings` | Manage Server | Show this server's settings |
 | `/admin timezone` | Manage Server | Server time zone (default America/Los_Angeles) |
+| `/follow` | Everyone | Pick the games you follow: their ping roles, plus their threads in the game forum |
+| `/colours create` | Manage Roles | Role menus: `create`, `add` (role, emoji, label, description), `remove`, `move`, `edit`, `onboarding` (offer it to newcomers), `post`, `preview`, `import` (copy a MEE6 reaction-role message), `list`, `delete` |
+| `/noticeboard create` | Manage Server | Pages: `create`, `section add/edit/image/remove/move` (a pop-up form), `import` (copy an existing message such as the rules), `starter` (a draft Pirate's Guide), `post`, `preview`, `gameindex`, `list`, `delete` |
 | `/admin gangplank setup` | Manage Server | Intro channel, Pending role, Harbormasters role, rules and orientation channels, optional alert channel. Then `on`/`off`, `emoji`, `timing`, `status` |
 | `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
@@ -40,6 +43,20 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 
 | `/admin voyages channel` | Manage Server | Where voyage cards are posted (e.g. #brimstone-events); empty = wherever `/voyage create` is used |
 
+### How Colours (role menus) work
+
+- Each menu's card lists its roles with one button. Pressing it opens a private dropdown already ticked with the roles you wear; save it and you wear exactly those. Menus can be pick-one (regions) or pick-any.
+- Menus marked with `/colours onboarding` appear as buttons on the welcome-aboard message, alongside **Follow games**.
+- Picking a region too broad for one time zone (Asia, South America) asks which zone is closest.
+- `/colours import` copies a MEE6 reaction-role message (emoji and roles) into a new menu; the old message is left alone until you delete it.
+- PlunderBot won't hand out roles with moderator permissions, or roles above its own.
+
+### How the Notice Board works
+
+- A page is a list of sections; each is one embed with a heading, text (Markdown), colour and optional picture. Write them in a pop-up form, or `/noticeboard import` an existing message.
+- `/noticeboard post` posts the page; posting again edits the same messages in place. Long pages spill over several messages.
+- `/noticeboard gameindex` posts the Game Index: every game with its forum thread and ping role, and a **Follow games** button. Run it again after adding threads or roles.
+
 ### How Gangplank works
 
 - A newcomer joins, gets the **Pending** role, and PlunderBot welcomes them in #introductions: read the rules in #welcome, then introduce yourself and name your favorite game.
@@ -53,6 +70,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - Picking a region role (e.g. North America - East) sets your time zone to match, whichever bot hands out the role. A zone you choose with `/timezone set` always wins; `/timezone clear` falls back to your region role.
 - Times are typed in your own time zone (`/timezone set` or your region role), or with a zone added (`8pm ET`); without either, the server's zone is used and the confirmation says so. Every time PlunderBot shows is a Discord timestamp, which each member sees in their own local time.
 - The card has **Aboard**, **Maybe** and **Can't make it**. Pressing your current answer clears it. When the seats are full, Aboard goes on a waitlist, and the first in line is moved up (and pinged) when a seat opens.
+- A picture attached to a voyage shows on its card, on every repeat, and on the crew card when it sets sail. PlunderBot keeps its own copy (Discord's attachment links expire), and needs **Attach Files** in the card channels.
 - Each voyage gets a matching Discord Event in the server's Events list, kept in step with edits and cancellations.
 - Reminders ping everyone Aboard or Maybe. Reminders whose time had passed when the voyage was made are skipped.
 - At the start, Aboard becomes a crew: a crew card goes up for latecomers in the crew channel (and the voyage card links to it), the voice channel opens (named after the voyage, e.g. "🚢 | Fort Night") and the crew is pinged; Maybes get a nudge. When the crew's voice channel closes, the voyage and its Discord Event end.
@@ -78,7 +96,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application named **PlunderBot** and give it an avatar.
 2. **Bot** tab: turn on **Server Members Intent**. Leave Presence and Message Content off for now.
 3. **Bot** tab: **Reset Token** and keep the token for step 3. Never paste it in chat or commit it.
-4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**, **Kick Members**, **Read Message History**, **Add Reactions**. Open the URL and add PlunderBot to Brimstone Hill Fortress.
+4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**, **Kick Members**, **Read Message History**, **Add Reactions**, **Attach Files**, **Manage Threads**. Open the URL and add PlunderBot to Brimstone Hill Fortress.
 5. In **Server Settings › Roles**, drag PlunderBot's role **above** any role it should hand out (the birthday role now, the Colours roles later).
 
 ### 2. GitHub

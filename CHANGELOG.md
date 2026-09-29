@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0 (2026-09-29): Colours and the Notice Board
+
+Phase 4 complete. Replaces MEE6's reaction roles and embed posts.
+
+- Colours: role menus with a private, pre-ticked picker; pick-one or pick-any; `/colours` to build, post, reorder and import MEE6 reaction-role messages. Mod-level roles and roles above PlunderBot can't be added.
+- Onboarding: menus marked for onboarding, and Follow games, appear as buttons on the welcome-aboard message.
+- Picking Asia or South America asks which time zone is closest.
+- Notice Board: pages of sections written in a pop-up form or imported from an existing message (pictures copied too), posted and then updated in place. `/noticeboard starter` drafts a Pirate's Guide.
+- Game Index: every game with its forum thread and ping role, and a Follow games button. `/follow` and the button give a game's ping role and add you to its forum thread.
+
+## 0.4.2 (2026-09-29): Category picker
+
+- `/admin crew category` lists the server's categories itself, since Discord's channel picker often won't select a category (especially one with symbols in its name).
+
+## 0.4.1 (2026-09-29): Pictures and role tags
+
+- `/voyage create`, `/voyage edit` and `/crew start` take a picture for the card. A voyage's picture carries over to its repeats and to the crew card when it sets sail. PlunderBot stores its own copy under /data/images, since Discord's attachment links expire. PNG, JPG, GIF or WEBP up to 10 MB; needs Attach Files.
+- Voyages choose when to tag the game's ping role: when posted (default), also at each reminder and when it sails, or never. `/crew start` can skip the role ping with `notify:False`.
+
 ## 0.4.0 (2026-09-29): Gangplank
 
 Phase 4, part 1: the airlock in #introductions. Replaces MEE6's welcome message and its "Pending to Full" automation.

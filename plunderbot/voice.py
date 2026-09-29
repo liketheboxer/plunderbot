@@ -154,6 +154,9 @@ LINES: dict[str, list[str]] = {
     "crew_cant_post": [
         "{cuss} I can't post a crew card here. A Quartermaster needs to give me Send Messages and Embed Links in this channel.",
     ],
+    "image_bad": [
+        "{cuss} I can't hang that on the card. Send a PNG, JPG, GIF or WEBP picture, up to 10 MB, please!",
+    ],
     "crew_renamed": [
         "Splendid name! The card's updated, and the voice channel follows as soon as Discord lets me.",
     ],
@@ -192,6 +195,10 @@ LINES: dict[str, list[str]] = {
     "voyage_reminder": [
         "Ahoy {names}! **{title}** sets sail {when}. {link}",
         "A friendly nudge from your butler, {names}: **{title}** is {when}! {link}",
+    ],
+    "voyage_sailing_role": [
+        "{role}, **{title}** is setting sail right now! Hop into {channel} to join or watch.",
+        "Anchors aweigh, {role}! **{title}** is sailing. Come aboard or spectate in {channel}.",
     ],
     "voyage_starting_maybe": [
         "{names}, **{title}** is starting now! Come aboard in {channel} if you can make it.",
@@ -266,6 +273,12 @@ LINES: dict[str, list[str]] = {
         "{member} is aboard! Welcome to the Fortress! Swing by {orientation} to pick your roles, and don't "
         "skip the region role: it's how I show you every time in your own time zone.",
     ],
+    "gangplank_approved_buttons": [
+        "Thanks for introducing yourself, {member}, and welcome aboard! Pick your region and roles with the "
+        "buttons below (only you see your picks), and swing by {orientation} for the Pirate's Guide.",
+        "{member} is aboard! Welcome to the Fortress! Use the buttons below to pick your region, so every time "
+        "shows in your own time zone, plus your roles and games. The Pirate's Guide is in {orientation}.",
+    ],
     "gangplank_reminder": [
         "Ahoy, {member}! A friendly nudge from your butler: introduce yourself here and tell us your favorite "
         "game, and a Harbormaster will wave you aboard. The gangplank goes up {deadline}.",
@@ -275,6 +288,34 @@ LINES: dict[str, list[str]] = {
     "gangplank_kick_dm": [
         "Ahoy from {server}! You didn't introduce yourself within {days} days, so I've had to raise the "
         "gangplank. No hard feelings: you're welcome back with a fresh invite whenever you're ready.",
+    ],
+    "colours_prompt": [
+        "Pick your {title} below and I'll see to the rest!",
+        "At your service! Tick whichever {title} suit you and press away.",
+    ],
+    "colours_done": [
+        "All sorted! {changes}",
+        "Done and dusted! {changes}",
+    ],
+    "colours_same": [
+        "Nothing to change: you're already wearing exactly those!",
+    ],
+    "colours_gone": [
+        "{cuss} That menu has been taken down. A Quartermaster can post a fresh one.",
+    ],
+    "colours_cant": [
+        "{cuss} I couldn't change your roles. A Quartermaster needs to move my role above these ones.",
+    ],
+    "colours_zone_prompt": [
+        "Your region covers a lot of ocean! Which of these is closest to you? It's how I show every time in "
+        "your own time zone.",
+    ],
+    "follow_prompt": [
+        "Which games shall I keep you posted on? You'll get each game's ping role and I'll add you to its "
+        "thread in {forum}.",
+    ],
+    "follow_done": [
+        "Crow's nest updated! {changes}",
     ],
     "guild_only": [
         "{cuss} That order only works aboard the ship, not in private messages.",

@@ -21,6 +21,8 @@ COGS = [
     "plunderbot.cogs.voyages",
     "plunderbot.cogs.regions",
     "plunderbot.cogs.gangplank",
+    "plunderbot.cogs.colours",
+    "plunderbot.cogs.noticeboard",
 ]
 
 

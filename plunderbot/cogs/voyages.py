@@ -14,7 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import crew_emoji, games, voice
+from .. import crew_emoji, games, images, voice
 from ..birthday_logic import zone
 from ..crew_logic import iso, now_utc
 from ..db import Voyage
@@ -27,6 +27,10 @@ log = logging.getLogger("plunderbot.voyages")
 
 GAME_CHOICES = [app_commands.Choice(name=g.name, value=g.key) for g in games.GAMES]
 REPEAT_CHOICES = [app_commands.Choice(name=label, value=key) for key, label in REPEATS.items()]
+PINGS = {"posted": "Tag the game's role when it's posted",
+         "reminders": "Tag the game's role when posted, at each reminder and when it sails",
+         "off": "Don't tag the game's role"}
+PING_CHOICES = [app_commands.Choice(name=label, value=key) for key, label in PINGS.items()]
 BUTTONS = {
     "aboard": ("Aboard", discord.ButtonStyle.success),
     "maybe": ("Maybe", discord.ButtonStyle.secondary),
@@ -109,7 +113,18 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         size = v.size_label or profile.default_size.label
         return crew_emoji.resolve(profile, size, await self.bot.db.crew_emoji(v.guild_id))[1]
 
-    async def refresh(self, guild: discord.Guild | None, v: Voyage) -> None:
+    def card_file(self, channel, image_name: str | None) -> dict:
+        crew_cog = self.bot.get_cog("CrewCall")
+        return crew_cog.card_file(channel, image_name) if crew_cog else {}
+
+    async def game_role(self, guild: discord.Guild, v: Voyage):
+        """The game's ping role, if the voyage has one and it still exists."""
+        if not v.game_key:
+            return None
+        role_id = (await self.bot.db.game_ping_roles(guild.id)).get(v.game_key)
+        return guild.get_role(role_id) if role_id else None
+
+    async def refresh(self, guild: discord.Guild | None, v: Voyage, new_image: bool = False) -> None:
         if guild is None or not v.message_id:
             return
         channel = guild.get_channel(v.channel_id)
@@ -122,9 +137,13 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 crew = await self.bot.db.get_crew(v.crew_id)
                 if crew is not None and crew.message_id:
                     crew_link = f"https://discord.com/channels/{crew.guild_id}/{crew.channel_id}/{crew.message_id}"
-            await channel.get_partial_message(v.message_id).edit(
-                embed=render_voyage(v, rsvps, games.get(v.game_key), await self.emoji(v), crew_link),
-                view=voyage_view(v))
+            embed = images.show(render_voyage(v, rsvps, games.get(v.game_key), await self.emoji(v), crew_link),
+                                v.image, self.bot.config.data_dir)
+            extra = {}
+            if new_image:  # swap (or drop) the picture attached to the card
+                f = self.card_file(channel, v.image)
+                extra["attachments"] = [f["file"]] if f else []
+            await channel.get_partial_message(v.message_id).edit(embed=embed, view=voyage_view(v), **extra)
         except discord.NotFound:
             pass
         except discord.HTTPException as e:
@@ -138,15 +157,15 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         profile = games.get(v.game_key)
         text = voice.say("voyage_posted", organizer=f"<@{v.organizer_id}>", title=v.title)
         mentions = discord.AllowedMentions.none()
-        if announce_role and profile is not None:
-            role_id = (await self.bot.db.game_ping_roles(guild.id)).get(profile.key)
-            role = guild.get_role(role_id) if role_id else None
+        if announce_role and profile is not None and v.ping_role != "off":
+            role = await self.game_role(guild, v)
             if role is not None:
                 text += "\n" + voice.say("crew_ping", role=role.mention)
                 mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role])
         rsvps = await self.bot.db.rsvps(v.id)
-        message = await channel.send(text, embed=render_voyage(v, rsvps, profile, await self.emoji(v)),
-                                     view=voyage_view(v), allowed_mentions=mentions)
+        embed = images.show(render_voyage(v, rsvps, profile, await self.emoji(v)), v.image, self.bot.config.data_dir)
+        message = await channel.send(text, embed=embed, view=voyage_view(v), allowed_mentions=mentions,
+                                     **self.card_file(channel, v.image))
         v = await self.bot.db.update_voyage(v.id, message_id=message.id)
         event_id = await self.sync_event(guild, v)
         if event_id:
@@ -208,14 +227,18 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         description="Details for the crew",
         reminders="When to remind people before the start, e.g. 1d, 1h (default) or none",
         repeat="Repeat this voyage",
-        duration="Expected length in minutes (for the Discord Event)")
-    @app_commands.choices(game=GAME_CHOICES, repeat=REPEAT_CHOICES)
+        duration="Expected length in minutes (for the Discord Event)",
+        image="A picture for the voyage card (it goes on the crew card too when it sails)",
+        notify="When to tag the game's ping role (default: when it's posted)")
+    @app_commands.choices(game=GAME_CHOICES, repeat=REPEAT_CHOICES, notify=PING_CHOICES)
     async def create(self, interaction: discord.Interaction, title: app_commands.Range[str, 1, 80],
                      date: str, time: str, game: app_commands.Choice[str] | None = None,
                      size: str | None = None, seats: app_commands.Range[int, 1, 99] | None = None,
                      description: app_commands.Range[str, 1, 1000] | None = None,
                      reminders: str | None = None, repeat: app_commands.Choice[str] | None = None,
-                     duration: app_commands.Range[int, 15, 720] = 120) -> None:
+                     duration: app_commands.Range[int, 15, 720] = 120,
+                     image: discord.Attachment | None = None,
+                     notify: app_commands.Choice[str] | None = None) -> None:
         guild = interaction.guild
         tz, whose = await self.reading_zone(interaction.user.id, guild.id)
         profile = games.get(game.value) if game else None
@@ -256,12 +279,20 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             await interaction.response.send_message(voice.say("crew_cant_post"), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
+        image_name = None
+        if image is not None:
+            try:
+                image_name = await images.save(image, self.bot.config.data_dir)
+            except (images.ImageError, discord.HTTPException, OSError) as e:
+                log.info("Voyage picture refused: %s", e)
+                await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
+                return
         v = await self.bot.db.create_voyage(
             guild_id=guild.id, channel_id=channel.id, organizer_id=interaction.user.id, title=title.strip(),
             description=description, game_key=profile.key if profile else None, size_label=size_label,
             capacity=capacity, starts_at=iso(starts), duration_min=duration,
             reminders=",".join(str(m) for m in minutes), repeat=repeat.value if repeat else "none",
-            created_at=iso(now))
+            created_at=iso(now), image=image_name, ping_role=notify.value if notify else "posted")
         v = await self.bot.db.update_voyage(v.id, series_id=v.id)
         await self.bot.db.set_rsvp(v.id, interaction.user.id, "aboard", iso(now))
         try:
@@ -330,11 +361,15 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
     @app_commands.command(name="edit", description="Change a voyage you organized")
     @app_commands.describe(voyage="Which voyage", title="New title", date="New date", time="New time",
                            description="New details", reminders="New reminders, e.g. 1d, 1h or none",
-                           seats="New number of seats Aboard")
+                           seats="New number of seats Aboard", image="A new picture for the card",
+                           remove_image="Take the picture off the card", notify="When to tag the game's ping role")
+    @app_commands.choices(notify=PING_CHOICES)
     async def edit(self, interaction: discord.Interaction, voyage: str,
                    title: app_commands.Range[str, 1, 80] | None = None, date: str | None = None,
                    time: str | None = None, description: app_commands.Range[str, 1, 1000] | None = None,
-                   reminders: str | None = None, seats: app_commands.Range[int, 1, 99] | None = None) -> None:
+                   reminders: str | None = None, seats: app_commands.Range[int, 1, 99] | None = None,
+                   image: discord.Attachment | None = None, remove_image: bool = False,
+                   notify: app_commands.Choice[str] | None = None) -> None:
         v = await self._fetch_manageable(interaction, voyage)
         if v is None:
             return
@@ -367,10 +402,21 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             changes["description"] = description
         if seats:
             changes["capacity"] = seats
-        if not changes:
+        if notify:
+            changes["ping_role"] = notify.value
+        if remove_image and image is None:
+            changes["image"] = None
+        if not changes and image is None:
             await interaction.response.send_message(voice.say("voyage_nothing_changed"), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
+        if image is not None:
+            try:
+                changes["image"] = await images.save(image, self.bot.config.data_dir)
+            except (images.ImageError, discord.HTTPException, OSError) as e:
+                log.info("Voyage picture refused: %s", e)
+                await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
+                return
         async with self.lock:
             current = await self.bot.db.get_voyage(v.id)
             if current is None or current.status != "scheduled":  # it started meanwhile
@@ -380,7 +426,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 await self._reset_reminder_baseline(v.id)
             v = await self.bot.db.update_voyage(v.id, **changes)
             promoted = await self._promote_waitlist(v)
-        await self.refresh(interaction.guild, v)
+        await self.refresh(interaction.guild, v, new_image="image" in changes)
         await self.sync_event(interaction.guild, v)
         await self._announce_promotions(interaction.guild, v, promoted)
         stamp = int(datetime.fromisoformat(v.starts_at).timestamp())
@@ -559,11 +605,12 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             return
         people = rsvps.aboard + rsvps.maybe
         channel = guild.get_channel(v.channel_id)
-        if channel is None or not people:
+        role = await self.game_role(guild, v) if v.ping_role == "reminders" else None
+        if channel is None or not (people or role):
             return
         line = voice.say("voyage_reminder", title=v.title, when=f"<t:{int(starts.timestamp())}:R>",
                          names="{names}", link=_link(v))
-        await send_pinging(channel, lambda names: line.replace("{names}", names), people)
+        await send_pinging(channel, lambda names: line.replace("{names}", names or "crew"), people, role=role)
 
     async def start(self, guild: discord.Guild, v: Voyage, now: datetime | None = None, late: bool = False) -> None:
         now = now or now_utc()
@@ -593,7 +640,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 crew = await crew_cog.launch_for_voyage(
                     guild, crew_channel, captain_id=v.organizer_id, profile=profile, size_label=size_label,
                     capacity=v.capacity or games.OPEN_CAPACITY, members=[v.organizer_id] + rsvps.aboard,
-                    title=v.title, note=v.description[:200] if v.description else None)
+                    title=v.title, note=v.description[:200] if v.description else None, image=v.image)
             except Exception:
                 log.exception("Couldn't launch the crew for voyage %s", v.id)
         if crew is None:  # no crew means nothing will ever end it, so end it now
@@ -603,6 +650,15 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             return
         v = await self.bot.db.update_voyage(v.id, crew_id=crew.id)
         await self.refresh(guild, v)
+        role = await self.game_role(guild, v) if v.ping_role == "reminders" else None
+        if role is not None and crew.voice_channel_id:
+            try:
+                await crew_channel.send(voice.say("voyage_sailing_role", role=role.mention, title=v.title,
+                                                  channel=f"<#{crew.voice_channel_id}>"),
+                                        allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
+                                                                                 roles=[role]))
+            except discord.HTTPException as e:
+                log.warning("Couldn't tag the game role for voyage %s: %s", v.id, e)
         maybes = [u for u in rsvps.maybe if u not in rsvps.aboard]
         if channel is not None and maybes and crew.voice_channel_id:
             line = voice.say("voyage_starting_maybe", names="{names}", title=v.title,
@@ -650,7 +706,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 guild_id=v.guild_id, channel_id=v.channel_id, organizer_id=v.organizer_id, title=v.title,
                 description=v.description, game_key=v.game_key, size_label=v.size_label, capacity=v.capacity,
                 starts_at=iso(nxt), duration_min=v.duration_min, reminders=v.reminders, repeat=v.repeat,
-                series_id=series, created_at=iso(now_utc()))
+                series_id=series, created_at=iso(now_utc()), image=v.image, ping_role=v.ping_role)
             await self.bot.db.set_rsvp(new.id, v.organizer_id, "aboard", iso(now_utc()))
         try:
             return await self.post(guild, new, announce_role=False)

@@ -24,13 +24,16 @@ def batches(user_ids: list[int], first_budget: int, budget: int = LIMIT) -> list
     return out
 
 
-async def send_pinging(channel, make_text: Callable[[str], str], user_ids: list[int]) -> None:
-    """Send make_text(names) pinging user_ids; spill extra mentions into follow-up messages."""
+async def send_pinging(channel, make_text: Callable[[str], str], user_ids: list[int], role=None) -> None:
+    """Send make_text(names) pinging user_ids; spill extra mentions into follow-up messages.
+    With a role, the first message also tags that role (e.g. a game's ping role)."""
     ids = list(dict.fromkeys(user_ids))  # no duplicates, order kept
-    template = len(make_text(""))
+    prefix = f"{role.mention} " if role is not None else ""
+    template = len(prefix) + len(make_text(""))
     groups = batches(ids, LIMIT - template)
     for i, group in enumerate(groups):
         names = voice.join_names([f"<@{u}>" for u in group])
-        text = make_text(names) if i == 0 else names
+        text = prefix + make_text(names) if i == 0 else names
+        roles = [role] if (role is not None and i == 0) else False
         await channel.send(text, allowed_mentions=discord.AllowedMentions(
-            everyone=False, roles=False, users=[discord.Object(u) for u in group]))
+            everyone=False, roles=roles, users=[discord.Object(u) for u in group]))
