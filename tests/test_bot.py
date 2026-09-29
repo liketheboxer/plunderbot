@@ -24,6 +24,7 @@ async def bot(tmp_path):
     b.get_cog("Birthdays").announcer.cancel()  # the real loops need a live Discord connection
     b.get_cog("CrewCall").upkeep.cancel()
     b.get_cog("Voyages").clock.cancel()
+    b.get_cog("Gangplank").upkeep.cancel()
     yield b
     await b.db.close()
 
@@ -35,7 +36,7 @@ async def test_command_tree(bot):
     admin = top["admin"]
     assert isinstance(admin, app_commands.Group)
     assert admin.guild_only and admin.default_permissions.manage_guild
-    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages", "regions"}
+    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages", "regions", "gangplank"}
     assert {c.name for c in admin.get_command("crew").commands} == {"channel", "category", "cleanup", "expire", "pingrole", "autopings", "emoji"}
     assert {c.name for c in top["crew"].commands} == {"start", "close", "list", "rename"}
     bday_admin = admin.get_command("birthdays")

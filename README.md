@@ -24,6 +24,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/voyage list` | Everyone | Upcoming voyages |
 | `/admin settings` | Manage Server | Show this server's settings |
 | `/admin timezone` | Manage Server | Server time zone (default America/Los_Angeles) |
+| `/admin gangplank setup` | Manage Server | Intro channel, Pending role, Harbormasters role, rules and orientation channels, optional alert channel. Then `on`/`off`, `emoji`, `timing`, `status` |
 | `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
 | `/admin birthdays hour` | Manage Server | Hour the toast goes out, 0 to 23 (default 9 = 9:00 AM) |
@@ -38,6 +39,14 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin crew pingrole` | Manage Server | Opt-in role pinged when a crew call opens for a game (at most every 15 minutes per game) |
 
 | `/admin voyages channel` | Manage Server | Where voyage cards are posted (e.g. #brimstone-events); empty = wherever `/voyage create` is used |
+
+### How Gangplank works
+
+- A newcomer joins, gets the **Pending** role, and PlunderBot welcomes them in #introductions: read the rules in #welcome, then introduce yourself and name your favorite game.
+- A **Harbormaster** reacts to their introduction (or to PlunderBot's welcome for them) with **Yar** to let them aboard: Pending comes off and PlunderBot points them to #new-pirate-orientation for roles, including a region role for their time zone. **Nar** kicks them. Nobody else's reactions count.
+- Newcomers who never say anything get a reminder ping after 3 days and are kicked after 7 (with a friendly DM if their DMs are open). Anyone who has introduced themselves is never kicked automatically; that's the Harbormasters' call.
+- If Pending is taken off by hand, or the newcomer leaves, PlunderBot stops tracking them.
+- An optional alert channel tells Harbormasters about new introductions, approvals, rejections and kicks.
 
 ### How Voyages work
 
@@ -69,7 +78,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application named **PlunderBot** and give it an avatar.
 2. **Bot** tab: turn on **Server Members Intent**. Leave Presence and Message Content off for now.
 3. **Bot** tab: **Reset Token** and keep the token for step 3. Never paste it in chat or commit it.
-4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**. Open the URL and add PlunderBot to Brimstone Hill Fortress.
+4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**, **Kick Members**, **Read Message History**, **Add Reactions**. Open the URL and add PlunderBot to Brimstone Hill Fortress.
 5. In **Server Settings › Roles**, drag PlunderBot's role **above** any role it should hand out (the birthday role now, the Colours roles later).
 
 ### 2. GitHub

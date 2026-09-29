@@ -13,6 +13,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from .. import crew_emoji, games
+from ..gangplank_logic import emoji_key, APPROVE_DEFAULT, REJECT_DEFAULT, deadline
 from ..region_logic import guess_zone
 from ..voyage_logic import zone_from_name
 from ..crew_logic import voice_channel_name
@@ -42,6 +43,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
     crew = app_commands.Group(name="crew", description="Crew Call settings")
     voyages = app_commands.Group(name="voyages", description="Voyage settings")
     regions = app_commands.Group(name="regions", description="Region roles that set members' time zones")
+    gangplank = app_commands.Group(name="gangplank", description="Gangplank: the airlock in #introductions")
 
     def __init__(self, bot):
         self.bot = bot
@@ -435,6 +437,146 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         text = "\n".join(["**Region roles → time zones**", *lines]) if lines else \
             "No region roles are mapped yet. Try /admin regions auto."
         await interaction.response.send_message(text[:1990], ephemeral=True,
+                                                allowed_mentions=discord.AllowedMentions.none())
+
+    # ------------------------------------------------------------ gangplank
+    @gangplank.command(name="setup", description="Channels and roles for the airlock (doesn't turn it on)")
+    @app_commands.describe(intro_channel="Where newcomers introduce themselves (#introductions)",
+                           pending_role="The airlock role newcomers wear (Pending)",
+                           harbormaster_role="Who can let people aboard or turn them away (Harbormasters)",
+                           rules_channel="Linked in the welcome (#welcome)",
+                           orientation_channel="Linked once they're aboard (#new-pirate-orientation)",
+                           alert_channel="Optional: where Harbormasters hear about new intros and kicks")
+    async def gangplank_setup(self, interaction: discord.Interaction, intro_channel: discord.TextChannel,
+                              pending_role: discord.Role, harbormaster_role: discord.Role,
+                              rules_channel: discord.TextChannel, orientation_channel: discord.TextChannel,
+                              alert_channel: discord.TextChannel | None = None) -> None:
+        me = interaction.guild.me
+        problems = []
+        if pending_role.is_default() or pending_role.managed:
+            problems.append("Pending must be an ordinary role.")
+        if not me.guild_permissions.manage_roles or pending_role >= me.top_role:
+            problems.append(f"PlunderBot needs Manage Roles and its role above {pending_role.mention}.")
+        if not me.guild_permissions.kick_members:
+            problems.append("PlunderBot needs Kick Members to turn people away.")
+        perms = intro_channel.permissions_for(me)
+        if not (perms.view_channel and perms.send_messages and perms.read_message_history):
+            problems.append(f"PlunderBot needs View Channel, Send Messages and Read Message History in "
+                            f"{intro_channel.mention}.")
+        if alert_channel is not None and not alert_channel.permissions_for(me).send_messages:
+            problems.append(f"PlunderBot can't post in {alert_channel.mention}.")
+        if problems:
+            await interaction.response.send_message("Not saved:\n- " + "\n- ".join(problems), ephemeral=True,
+                                                    allowed_mentions=discord.AllowedMentions.none())
+            return
+        s = await self.bot.db.update_settings(
+            interaction.guild_id, intro_channel_id=intro_channel.id, pending_role_id=pending_role.id,
+            harbormaster_role_id=harbormaster_role.id, rules_channel_id=rules_channel.id,
+            orientation_channel_id=orientation_channel.id,
+            gangplank_alert_channel_id=alert_channel.id if alert_channel else None)
+        state = "on" if s.gangplank_enabled else "off (turn it on with /admin gangplank on)"
+        await interaction.response.send_message(
+            f"Gangplank saved. Newcomers get {pending_role.mention} and introduce themselves in "
+            f"{intro_channel.mention}; {harbormaster_role.mention} react Yar or Nar. Gangplank is {state}.",
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    @gangplank.command(name="emoji", description="Which emoji approve and reject (default: server emoji named Yar and Nar)")
+    @app_commands.describe(approve="Paste the emoji, or leave empty for the one named Yar",
+                           reject="Paste the emoji, or leave empty for the one named Nar")
+    async def gangplank_emoji(self, interaction: discord.Interaction, approve: str | None = None,
+                              reject: str | None = None) -> None:
+        values = {}
+        for field, text in (("approve_emoji", approve), ("reject_emoji", reject)):
+            if text is None:
+                values[field] = None
+                continue
+            key = emoji_key(text)
+            if key is None or (key.isdigit() and interaction.guild.get_emoji(int(key)) is None):
+                await interaction.response.send_message(
+                    f"I can't use \"{text}\". Paste the emoji itself (one from this server, or a standard one).",
+                    ephemeral=True)
+                return
+            values[field] = key
+        if values.get("approve_emoji") and values.get("approve_emoji") == values.get("reject_emoji"):
+            await interaction.response.send_message("Approve and reject need different emoji.", ephemeral=True)
+            return
+        await self.bot.db.update_settings(interaction.guild_id, **values)
+        await interaction.response.send_message(
+            f"Approve: {self._emoji_label(interaction.guild, values['approve_emoji'], APPROVE_DEFAULT)}. "
+            f"Reject: {self._emoji_label(interaction.guild, values['reject_emoji'], REJECT_DEFAULT)}.", ephemeral=True)
+
+    @staticmethod
+    def _emoji_label(guild, key: str | None, default_name: str) -> str:
+        if key is None:
+            found = next((e for e in guild.emojis if e.name.lower() == default_name), None)
+            return f"{found} (the server emoji named {found.name})" if found else \
+                f"a server emoji named {default_name.capitalize()} (none found yet!)"
+        if key.isdigit():
+            e = guild.get_emoji(int(key))
+            return str(e) if e else f"a deleted emoji ({key})"
+        return key
+
+    @gangplank.command(name="timing", description="Days before newcomers who haven't introduced themselves are reminded, then kicked")
+    async def gangplank_timing(self, interaction: discord.Interaction, remind_days: app_commands.Range[int, 1, 30],
+                               kick_days: app_commands.Range[int, 2, 60]) -> None:
+        if remind_days >= kick_days:
+            await interaction.response.send_message("The reminder has to come before the kick.", ephemeral=True)
+            return
+        await self.bot.db.update_settings(interaction.guild_id, gangplank_remind_days=remind_days,
+                                          gangplank_kick_days=kick_days)
+        await interaction.response.send_message(
+            f"Newcomers who haven't introduced themselves get a reminder after {remind_days} day(s) and are "
+            f"kicked after {kick_days}.", ephemeral=True)
+
+    @gangplank.command(name="on", description="Start greeting, reminding and letting newcomers aboard")
+    async def gangplank_on(self, interaction: discord.Interaction) -> None:
+        s = await self.bot.db.get_settings(interaction.guild_id)
+        if not (s.intro_channel_id and s.pending_role_id and s.harbormaster_role_id):
+            await interaction.response.send_message("Run /admin gangplank setup first.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        s = await self.bot.db.update_settings(interaction.guild_id, gangplank_enabled=1)
+        cog = self.bot.get_cog("Gangplank")
+        found = await cog.catch_up(interaction.guild, s, discord.utils.utcnow()) if cog else 0
+        await interaction.followup.send(
+            f"Gangplank is on. {found} member(s) already wearing Pending are now tracked; their "
+            f"{s.gangplank_remind_days}-day reminder and {s.gangplank_kick_days}-day kick clocks start now, "
+            "and anyone who has already posted in the intro channel won't be kicked.\n"
+            "Turn off MEE6's welcome message and its Pending automation so newcomers aren't greeted twice.",
+            ephemeral=True)
+
+    @gangplank.command(name="off", description="Stop greeting, reminding and kicking newcomers")
+    async def gangplank_off(self, interaction: discord.Interaction) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, gangplank_enabled=0)
+        await interaction.response.send_message("Gangplank is off. Nobody will be greeted, reminded or kicked.",
+                                                ephemeral=True)
+
+    @gangplank.command(name="status", description="Who's waiting on the gangplank")
+    async def gangplank_status(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        s = await self.bot.db.get_settings(guild.id)
+        lines = [f"**Gangplank is {'on' if s.gangplank_enabled else 'off'}**",
+                 f"Intro channel: {f'<#{s.intro_channel_id}>' if s.intro_channel_id else 'not set'} · "
+                 f"Pending: {f'<@&{s.pending_role_id}>' if s.pending_role_id else 'not set'} · "
+                 f"Harbormasters: {f'<@&{s.harbormaster_role_id}>' if s.harbormaster_role_id else 'not set'}",
+                 f"Approve: {self._emoji_label(guild, s.approve_emoji, APPROVE_DEFAULT)} · "
+                 f"Reject: {self._emoji_label(guild, s.reject_emoji, REJECT_DEFAULT)}",
+                 f"Reminder after {s.gangplank_remind_days} day(s), kick after {s.gangplank_kick_days} "
+                 "for anyone who hasn't introduced themselves"]
+        rows = await self.bot.db.boardings(guild.id)
+        if rows:
+            lines.append("")
+            for b in rows:
+                if b.responded_at:
+                    state = "introduced, waiting for a Harbormaster"
+                else:
+                    kick = deadline(b.joined_at, s.gangplank_kick_days)
+                    state = f"hasn't introduced themselves; kicked <t:{int(kick.timestamp())}:R>"
+                joined = deadline(b.joined_at, 0)
+                lines.append(f"<@{b.user_id}>: since <t:{int(joined.timestamp())}:R>, {state}")
+        else:
+            lines.append("Nobody is waiting.")
+        await interaction.response.send_message("\n".join(lines)[:1990], ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
 
 

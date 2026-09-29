@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 (2026-09-29): Gangplank
+
+Phase 4, part 1: the airlock in #introductions. Replaces MEE6's welcome message and its "Pending to Full" automation.
+
+- New members get the Pending role and a welcome asking them to read the rules and introduce themselves.
+- Harbormasters react Yar to let someone aboard (Pending comes off; they're pointed to role selection, including a region role for their time zone) or Nar to kick them. Works on the introduction or on PlunderBot's welcome.
+- No introduction: a reminder after 3 days and a kick after 7, both adjustable. Anyone who has introduced themselves is never auto-kicked.
+- Members already wearing Pending are picked up when Gangplank is turned on; their clock starts then, and anyone who already posted in #introductions counts as introduced.
+- `/admin gangplank setup|emoji|timing|on|off|status`. Off until turned on.
+
 ## 0.3.3 (2026-09-29): More region zones
 
 - Region roles for every North American and Australian zone are recognised by `/admin regions auto`: Hawaii, Alaska, Pacific, Arizona, Mountain, Central, Eastern, Atlantic and Newfoundland; Western, Northern Territory, South Australia, Queensland and Eastern Australia. Arizona, Queensland and the Northern Territory keep their no-daylight-saving time.

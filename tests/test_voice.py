@@ -13,7 +13,8 @@ def test_every_line_fills_in(key):
                   captain="@Boxer", game="Sea of Thieves", size="Galleon", role="@SoT", channel="#voice",
                   options="Sloop, Galleon", organizer="@Boxer", title="Fort Night", link="https://x",
                   reminders="1 day, 1 hour before", error="Bad date.", when="in 1 hour", zone="America/New_York (EDT)",
-                  local="8:00 PM")
+                  local="8:00 PM", member="@Newbie", server="Brimstone Hill Fortress", rules="#welcome",
+                  orientation="#new-pirate-orientation", deadline="in 4 days", days=7)
     fields = {f for line in voice.LINES[key] for _, f, _, _ in string.Formatter().parse(line) if f}
     assert fields <= set(values) | {"cuss"}, f"{key} uses unknown fields: {fields - set(values)}"
     for i in range(len(voice.LINES[key]) * 4):

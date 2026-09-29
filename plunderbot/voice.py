@@ -253,6 +253,29 @@ LINES: dict[str, list[str]] = {
     "tz_cleared": [
         "Forgotten! I'll read your times in the server's time zone again.",
     ],
+    "gangplank_welcome": [
+        "Welcome aboard **{server}**, {member}! First, have a good read of the rules in {rules}. Then show us "
+        "you're not a bot (takes one to know one!): introduce yourself right here and tell us your favorite game.",
+        "Ahoy, {member}, and welcome to **{server}**! Step one: read the rules in {rules}, properly now. Step two: "
+        "prove you're flesh and grog, not bolts like me, by introducing yourself here and telling us your "
+        "favorite game.",
+    ],
+    "gangplank_approved": [
+        "Thanks for introducing yourself, {member}, and welcome aboard! Head over to {orientation} to pick "
+        "your roles, and grab a region role while you're there so every voyage time shows in your own time zone.",
+        "{member} is aboard! Welcome to the Fortress! Swing by {orientation} to pick your roles, and don't "
+        "skip the region role: it's how I show you every time in your own time zone.",
+    ],
+    "gangplank_reminder": [
+        "Ahoy, {member}! A friendly nudge from your butler: introduce yourself here and tell us your favorite "
+        "game, and a Harbormaster will wave you aboard. The gangplank goes up {deadline}.",
+        "{member}, the crew's still waiting to meet you! Say hello here and tell us your favorite game. "
+        "If I don't hear from you, the gangplank goes up {deadline}.",
+    ],
+    "gangplank_kick_dm": [
+        "Ahoy from {server}! You didn't introduce yourself within {days} days, so I've had to raise the "
+        "gangplank. No hard feelings: you're welcome back with a fresh invite whenever you're ready.",
+    ],
     "guild_only": [
         "{cuss} That order only works aboard the ship, not in private messages.",
     ],

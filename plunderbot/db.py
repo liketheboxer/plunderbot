@@ -161,6 +161,29 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (guild_id, role_id)
     );
     """,
+    # 10: Gangplank, the airlock in #introductions
+    """
+    ALTER TABLE guild_settings ADD COLUMN gangplank_enabled INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE guild_settings ADD COLUMN intro_channel_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN pending_role_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN harbormaster_role_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN rules_channel_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN orientation_channel_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN gangplank_alert_channel_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN approve_emoji TEXT;
+    ALTER TABLE guild_settings ADD COLUMN reject_emoji TEXT;
+    ALTER TABLE guild_settings ADD COLUMN gangplank_remind_days INTEGER NOT NULL DEFAULT 3;
+    ALTER TABLE guild_settings ADD COLUMN gangplank_kick_days INTEGER NOT NULL DEFAULT 7;
+    CREATE TABLE gangplank (
+        guild_id          INTEGER NOT NULL,
+        user_id           INTEGER NOT NULL,
+        joined_at         TEXT NOT NULL,
+        prompt_message_id INTEGER,
+        responded_at      TEXT,
+        reminded_at       TEXT,
+        PRIMARY KEY (guild_id, user_id)
+    );
+    """,
 ]
 
 
@@ -177,9 +200,34 @@ class GuildSettings:
     crew_expire_minutes: int = 60
     voyage_channel_id: int | None = None
     crew_channel_id: int | None = None
+    gangplank_enabled: int = 0
+    intro_channel_id: int | None = None
+    pending_role_id: int | None = None
+    harbormaster_role_id: int | None = None
+    rules_channel_id: int | None = None
+    orientation_channel_id: int | None = None
+    gangplank_alert_channel_id: int | None = None
+    approve_emoji: str | None = None
+    reject_emoji: str | None = None
+    gangplank_remind_days: int = 3
+    gangplank_kick_days: int = 7
 
 
-_SETTING_COLUMNS = {"timezone", "birthday_channel_id", "birthday_hour", "birthday_role_id",
+@dataclass
+class Boarding:
+    """A newcomer waiting on the gangplank."""
+    guild_id: int
+    user_id: int
+    joined_at: str
+    prompt_message_id: int | None = None
+    responded_at: str | None = None
+    reminded_at: str | None = None
+
+
+_SETTING_COLUMNS = {"gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
+                    "rules_channel_id", "orientation_channel_id", "gangplank_alert_channel_id",
+                    "approve_emoji", "reject_emoji", "gangplank_remind_days", "gangplank_kick_days",
+                    "timezone", "birthday_channel_id", "birthday_hour", "birthday_role_id",
                     "birthday_last_announced", "crew_category_id", "crew_cleanup_minutes",
                     "crew_expire_minutes", "voyage_channel_id", "crew_channel_id"}
 
@@ -583,3 +631,46 @@ class Database:
                 "ON CONFLICT (guild_id, role_id) DO UPDATE SET timezone = excluded.timezone",
                 (guild_id, role_id, tz))
         await self.conn.commit()
+
+    # ------------------------------------------------------------ gangplank
+    async def add_boarding(self, guild_id: int, user_id: int, joined_at: str,
+                           prompt_message_id: int | None = None, responded_at: str | None = None) -> None:
+        """Start (or restart, on a rejoin) someone's wait on the gangplank."""
+        await self.conn.execute(
+            "INSERT INTO gangplank (guild_id, user_id, joined_at, prompt_message_id, responded_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (guild_id, user_id) DO UPDATE SET "
+            "joined_at = excluded.joined_at, prompt_message_id = excluded.prompt_message_id, "
+            "responded_at = excluded.responded_at, reminded_at = NULL",
+            (guild_id, user_id, joined_at, prompt_message_id, responded_at))
+        await self.conn.commit()
+
+    async def get_boarding(self, guild_id: int, user_id: int) -> Boarding | None:
+        row = await (await self.conn.execute(
+            "SELECT * FROM gangplank WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))).fetchone()
+        return Boarding(**{k: row[k] for k in row.keys()}) if row else None
+
+    async def boarding_by_prompt(self, guild_id: int, message_id: int) -> Boarding | None:
+        row = await (await self.conn.execute(
+            "SELECT * FROM gangplank WHERE guild_id = ? AND prompt_message_id = ?",
+            (guild_id, message_id))).fetchone()
+        return Boarding(**{k: row[k] for k in row.keys()}) if row else None
+
+    async def boardings(self, guild_id: int) -> list[Boarding]:
+        rows = await (await self.conn.execute(
+            "SELECT * FROM gangplank WHERE guild_id = ? ORDER BY joined_at", (guild_id,))).fetchall()
+        return [Boarding(**{k: r[k] for k in r.keys()}) for r in rows]
+
+    async def update_boarding(self, guild_id: int, user_id: int, **values) -> None:
+        bad = set(values) - {"prompt_message_id", "responded_at", "reminded_at"}
+        if bad:
+            raise ValueError(f"Unknown gangplank columns: {', '.join(sorted(bad))}")
+        cols = ", ".join(f"{k} = ?" for k in values)
+        await self.conn.execute(f"UPDATE gangplank SET {cols} WHERE guild_id = ? AND user_id = ?",
+                                (*values.values(), guild_id, user_id))
+        await self.conn.commit()
+
+    async def remove_boarding(self, guild_id: int, user_id: int) -> bool:
+        cur = await self.conn.execute("DELETE FROM gangplank WHERE guild_id = ? AND user_id = ?",
+                                      (guild_id, user_id))
+        await self.conn.commit()
+        return cur.rowcount > 0

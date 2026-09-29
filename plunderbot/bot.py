@@ -20,6 +20,7 @@ COGS = [
     "plunderbot.cogs.crew",
     "plunderbot.cogs.voyages",
     "plunderbot.cogs.regions",
+    "plunderbot.cogs.gangplank",
 ]
 
 

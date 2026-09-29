@@ -134,6 +134,7 @@ async def env(tmp_path):
     bot.get_cog("CrewCall").upkeep.cancel()
     cog = bot.get_cog("Voyages")
     cog.clock.cancel()
+    bot.get_cog("Gangplank").upkeep.cancel()
     text = FakeTextChannel(20)
     guild = VoyageGuild(10, text)
     guild.members[1] = SimpleNamespace(id=1, display_name="Boxer")
