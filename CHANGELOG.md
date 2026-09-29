@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0 (2026-09-29): Crew Call
+
+Phase 2 of 8.
+
+- Game profiles for all 15 of Brimstone Hill's games, with each game's crew sizes and activity tags.
+- `/crew start` posts a crew card with Join, Leave, Set Sail and Close buttons that survive restarts. Size and activity are suggested per game as you type.
+- A full crew sets sail by itself; sailing opens a voice channel with no user limit, so others can drop in to watch, and pings the crew. Empty crew voice channels are removed after a set time (15 minutes' grace before anyone joins); unsailed calls expire.
+- 1 Player Hangout for parallel play: no size limit, voice channel open at once, anyone can join.
+- Opt-in ping roles per game, at most one ping per game every 15 minutes.
+- `/crew close`, `/crew list`, and `/admin crew category|cleanup|expire|pingrole|autopings`. `autopings` matches existing game roles by name and can create the missing ones.
+- New gauges: `crews_mustering`, `crews_sailing`.
+
 ## 0.1.0 (2026-09-29): Hull
 
 First build, phase 1 of 8.

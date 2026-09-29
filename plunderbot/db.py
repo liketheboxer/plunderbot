@@ -7,7 +7,7 @@ each is recorded in schema_version, so a refit upgrades the data in place.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import aiosqlite
@@ -52,6 +52,45 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (guild_id, user_id)
     );
     """,
+    # 3: Crew Call
+    """
+    ALTER TABLE guild_settings ADD COLUMN crew_category_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN crew_cleanup_minutes INTEGER NOT NULL DEFAULT 5;
+    ALTER TABLE guild_settings ADD COLUMN crew_expire_minutes INTEGER NOT NULL DEFAULT 60;
+    CREATE TABLE game_settings (
+        guild_id     INTEGER NOT NULL,
+        game_key     TEXT NOT NULL,
+        ping_role_id INTEGER,
+        PRIMARY KEY (guild_id, game_key)
+    );
+    CREATE TABLE crews (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id          INTEGER NOT NULL,
+        channel_id        INTEGER NOT NULL,
+        message_id        INTEGER,
+        captain_id        INTEGER NOT NULL,
+        game_key          TEXT NOT NULL,
+        size_label        TEXT NOT NULL,
+        capacity          INTEGER NOT NULL,
+        activity          TEXT,
+        note              TEXT,
+        status            TEXT NOT NULL DEFAULT 'open',  -- open, sailing, closed, expired
+        voice_channel_id  INTEGER,
+        voice_empty_since TEXT,
+        voice_occupied    INTEGER NOT NULL DEFAULT 0,
+        created_at        TEXT NOT NULL,
+        expires_at        TEXT NOT NULL,
+        sailed_at         TEXT,
+        ended_at          TEXT
+    );
+    CREATE INDEX crews_active ON crews (status);
+    CREATE TABLE crew_members (
+        crew_id   INTEGER NOT NULL REFERENCES crews (id) ON DELETE CASCADE,
+        user_id   INTEGER NOT NULL,
+        joined_at TEXT NOT NULL,
+        PRIMARY KEY (crew_id, user_id)
+    );
+    """,
 ]
 
 
@@ -63,10 +102,49 @@ class GuildSettings:
     birthday_hour: int = 9
     birthday_role_id: int | None = None
     birthday_last_announced: str | None = None
+    crew_category_id: int | None = None
+    crew_cleanup_minutes: int = 5
+    crew_expire_minutes: int = 60
 
 
 _SETTING_COLUMNS = {"timezone", "birthday_channel_id", "birthday_hour", "birthday_role_id",
-                    "birthday_last_announced"}
+                    "birthday_last_announced", "crew_category_id", "crew_cleanup_minutes",
+                    "crew_expire_minutes"}
+
+
+@dataclass
+class Crew:
+    id: int
+    guild_id: int
+    channel_id: int
+    message_id: int | None
+    captain_id: int
+    game_key: str
+    size_label: str
+    capacity: int
+    activity: str | None
+    note: str | None
+    status: str
+    voice_channel_id: int | None
+    voice_empty_since: str | None
+    voice_occupied: int
+    created_at: str
+    expires_at: str
+    sailed_at: str | None
+    ended_at: str | None
+    members: list[int] = field(default_factory=list)  # join order, captain first
+
+    @property
+    def active(self) -> bool:
+        return self.status in ("open", "sailing")
+
+    @property
+    def full(self) -> bool:
+        return len(self.members) >= self.capacity
+
+
+_CREW_COLUMNS = {"message_id", "status", "voice_channel_id", "voice_empty_since", "voice_occupied",
+                 "sailed_at", "ended_at"}
 
 
 class Database:
@@ -186,3 +264,90 @@ class Database:
         await self.conn.execute("DELETE FROM birthday_role_grants WHERE guild_id = ? AND user_id = ?",
                                 (guild_id, user_id))
         await self.conn.commit()
+
+    # ------------------------------------------------------------ game settings
+    async def game_ping_roles(self, guild_id: int) -> dict[str, int]:
+        rows = await (await self.conn.execute(
+            "SELECT game_key, ping_role_id FROM game_settings WHERE guild_id = ? AND ping_role_id IS NOT NULL",
+            (guild_id,))).fetchall()
+        return {r["game_key"]: r["ping_role_id"] for r in rows}
+
+    async def set_game_ping_role(self, guild_id: int, game_key: str, role_id: int | None) -> None:
+        await self.conn.execute(
+            "INSERT INTO game_settings (guild_id, game_key, ping_role_id) VALUES (?, ?, ?) "
+            "ON CONFLICT (guild_id, game_key) DO UPDATE SET ping_role_id = excluded.ping_role_id",
+            (guild_id, game_key, role_id))
+        await self.conn.commit()
+
+    # ------------------------------------------------------------ crews
+    async def create_crew(self, *, guild_id: int, channel_id: int, captain_id: int, game_key: str,
+                          size_label: str, capacity: int, activity: str | None, note: str | None,
+                          created_at: str, expires_at: str) -> Crew:
+        cur = await self.conn.execute(
+            "INSERT INTO crews (guild_id, channel_id, captain_id, game_key, size_label, capacity, activity, "
+            "note, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (guild_id, channel_id, captain_id, game_key, size_label, capacity, activity, note,
+             created_at, expires_at))
+        crew_id = cur.lastrowid
+        await self.conn.execute("INSERT INTO crew_members (crew_id, user_id, joined_at) VALUES (?, ?, ?)",
+                                (crew_id, captain_id, created_at))
+        await self.conn.commit()
+        return await self.get_crew(crew_id)
+
+    async def get_crew(self, crew_id: int) -> Crew | None:
+        row = await (await self.conn.execute("SELECT * FROM crews WHERE id = ?", (crew_id,))).fetchone()
+        if row is None:
+            return None
+        crew = Crew(**{k: row[k] for k in row.keys()})
+        members = await (await self.conn.execute(
+            "SELECT user_id FROM crew_members WHERE crew_id = ? ORDER BY joined_at, rowid", (crew_id,))).fetchall()
+        crew.members = [m["user_id"] for m in members]
+        return crew
+
+    async def active_crews(self, guild_id: int | None = None) -> list[Crew]:
+        sql = "SELECT id FROM crews WHERE status IN ('open', 'sailing')"
+        args: tuple = ()
+        if guild_id is not None:
+            sql += " AND guild_id = ?"
+            args = (guild_id,)
+        rows = await (await self.conn.execute(sql + " ORDER BY id", args)).fetchall()
+        return [c for c in [await self.get_crew(r["id"]) for r in rows] if c is not None]
+
+    async def active_crew_led_by(self, guild_id: int, captain_id: int) -> Crew | None:
+        row = await (await self.conn.execute(
+            "SELECT id FROM crews WHERE guild_id = ? AND captain_id = ? AND status IN ('open', 'sailing') "
+            "ORDER BY id DESC LIMIT 1", (guild_id, captain_id))).fetchone()
+        return await self.get_crew(row["id"]) if row else None
+
+    async def update_crew(self, crew_id: int, **values) -> Crew | None:
+        bad = set(values) - _CREW_COLUMNS
+        if bad:
+            raise ValueError(f"Unknown crew fields: {', '.join(sorted(bad))}")
+        if values:
+            cols = ", ".join(f"{k} = ?" for k in values)
+            await self.conn.execute(f"UPDATE crews SET {cols} WHERE id = ?", (*values.values(), crew_id))
+            await self.conn.commit()
+        return await self.get_crew(crew_id)
+
+    async def add_crew_member(self, crew_id: int, user_id: int, joined_at: str) -> bool:
+        """Adds the member if there's a free seat. Returns False if full, closed or already aboard.
+
+        Callers serialise crew changes with the Crew Call cog's lock, so the check and the
+        insert can't interleave with another join.
+        """
+        row = await (await self.conn.execute(
+            "SELECT c.capacity, c.status, (SELECT COUNT(*) FROM crew_members m WHERE m.crew_id = c.id) AS n, "
+            "EXISTS (SELECT 1 FROM crew_members m WHERE m.crew_id = c.id AND m.user_id = ?) AS aboard "
+            "FROM crews c WHERE c.id = ?", (user_id, crew_id))).fetchone()
+        if row is None or row["aboard"] or row["n"] >= row["capacity"] or row["status"] not in ("open", "sailing"):
+            return False
+        await self.conn.execute("INSERT INTO crew_members (crew_id, user_id, joined_at) VALUES (?, ?, ?)",
+                                (crew_id, user_id, joined_at))
+        await self.conn.commit()
+        return True
+
+    async def remove_crew_member(self, crew_id: int, user_id: int) -> bool:
+        cur = await self.conn.execute("DELETE FROM crew_members WHERE crew_id = ? AND user_id = ?",
+                                      (crew_id, user_id))
+        await self.conn.commit()
+        return cur.rowcount > 0

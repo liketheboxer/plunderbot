@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from .. import games
 from ..birthday_logic import valid_timezone
 
 _ZONES = sorted(available_timezones())
@@ -35,6 +36,7 @@ def _hour_label(hour: int) -> str:
 @app_commands.default_permissions(manage_guild=True)
 class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot settings for Quartermasters"):
     birthdays = app_commands.Group(name="birthdays", description="Birthday announcement settings")
+    crew = app_commands.Group(name="crew", description="Crew Call settings")
 
     def __init__(self, bot):
         self.bot = bot
@@ -48,13 +50,20 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         channel = f"<#{s.birthday_channel_id}>" if s.birthday_channel_id else "not set (announcements off)"
         role = f"<@&{s.birthday_role_id}>" if s.birthday_role_id else "none"
         count = len(await self.bot.db.birthdays(interaction.guild_id))
+        category = f"<#{s.crew_category_id}>" if s.crew_category_id else "same category as the crew card"
+        pings = await self.bot.db.game_ping_roles(interaction.guild_id)
+        ping_text = ", ".join(f"{games.get(k).name if games.get(k) else k} <@&{r}>" for k, r in sorted(pings.items()))
         text = (
             f"**PlunderBot {self.bot.version} settings**\n"
             f"Time zone: {tz}\n"
             f"Birthday channel: {channel}\n"
             f"Birthday announcement time: {_hour_label(s.birthday_hour)}\n"
             f"Birthday role: {role}\n"
-            f"Birthdays on file: {count}"
+            f"Birthdays on file: {count}\n"
+            f"Crew voice channels: {category}\n"
+            f"Empty crew voice channels removed after: {s.crew_cleanup_minutes} min\n"
+            f"Unfilled crew calls expire after: {s.crew_expire_minutes} min\n"
+            f"Crew ping roles: {ping_text or 'none'}"
         )
         await interaction.response.send_message(text, ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
@@ -131,6 +140,100 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         await self.bot.db.update_settings(interaction.guild_id, birthday_channel_id=None)
         await interaction.response.send_message(
             "Birthday toasts are off. Members can still save their birthdays.", ephemeral=True)
+
+    # ------------------------------------------------------------ crew call
+    @crew.command(name="category", description="Category for crew voice channels (leave empty: next to the card)")
+    async def crew_category(self, interaction: discord.Interaction,
+                            category: discord.CategoryChannel | None = None) -> None:
+        if category is not None and not category.permissions_for(interaction.guild.me).manage_channels:
+            await interaction.response.send_message(
+                f"I need Manage Channels in {category.name} to open voice channels there.", ephemeral=True)
+            return
+        await self.bot.db.update_settings(interaction.guild_id, crew_category_id=category.id if category else None)
+        where = category.name if category else "the same category as each crew card"
+        await interaction.response.send_message(f"Crew voice channels will open in {where}.", ephemeral=True)
+
+    @crew.command(name="cleanup", description="Minutes an empty crew voice channel waits before it's removed")
+    async def crew_cleanup(self, interaction: discord.Interaction, minutes: app_commands.Range[int, 1, 120]) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, crew_cleanup_minutes=minutes)
+        await interaction.response.send_message(
+            f"Empty crew voice channels will be removed after {minutes} min "
+            "(15 min minimum before anyone has joined).", ephemeral=True)
+
+    @crew.command(name="expire", description="Minutes before an unfilled crew call closes itself")
+    async def crew_expire(self, interaction: discord.Interaction, minutes: app_commands.Range[int, 10, 720]) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, crew_expire_minutes=minutes)
+        await interaction.response.send_message(
+            f"New crew calls will close after {minutes} min if they haven't sailed.", ephemeral=True)
+
+    @crew.command(name="pingrole", description="Role pinged when a crew call opens for a game (empty: no ping)")
+    @app_commands.choices(game=[app_commands.Choice(name=g.name, value=g.key) for g in games.GAMES])
+    async def crew_pingrole(self, interaction: discord.Interaction, game: app_commands.Choice[str],
+                            role: discord.Role | None = None) -> None:
+        if role is None:
+            await self.bot.db.set_game_ping_role(interaction.guild_id, game.value, None)
+            await interaction.response.send_message(f"{game.name} crew calls won't ping anyone.", ephemeral=True)
+            return
+        if role.is_default() or role.managed or _elevated(role.permissions):
+            await interaction.response.send_message(
+                "Pick an opt-in game role with no special permissions.", ephemeral=True)
+            return
+        await self.bot.db.set_game_ping_role(interaction.guild_id, game.value, role.id)
+        note = ""
+        if not role.mentionable and not interaction.guild.me.guild_permissions.mention_everyone:
+            note = (" Heads up: that role isn't mentionable, so the ping won't go through. Turn on "
+                    "\"Allow anyone to @mention this role\" in its settings.")
+        await interaction.response.send_message(f"{game.name} crew calls will ping {role.mention}.{note}",
+                                                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    @crew.command(name="autopings", description="Match each game to its ping role by name, and optionally create missing ones")
+    @app_commands.describe(create_missing="Create a mentionable, permission-free role for games that have none")
+    async def crew_autopings(self, interaction: discord.Interaction, create_missing: bool = False) -> None:
+        guild, me = interaction.guild, interaction.guild.me
+        await interaction.response.defer(ephemeral=True)
+        current = await self.bot.db.game_ping_roles(guild.id)
+        matched, kept, created, missing, unmentionable, failed = [], [], [], [], [], []
+        for g in games.GAMES:
+            role = guild.get_role(current[g.key]) if g.key in current else None
+            if role is not None:
+                kept.append((g, role))
+            else:
+                role = next((r for r in guild.roles if g.matches_role_name(r.name) and not r.managed
+                             and not r.is_default() and not _elevated(r.permissions)), None)
+                if role is None and create_missing:
+                    try:
+                        role = await guild.create_role(name=g.name, mentionable=True,
+                                                       permissions=discord.Permissions.none(),
+                                                       reason="PlunderBot crew ping role")
+                        created.append((g, role))
+                    except discord.HTTPException as e:
+                        failed.append(f"{g.name} ({e.text or e.status})")
+                        continue
+                elif role is not None:
+                    matched.append((g, role))
+                if role is None:
+                    missing.append(g.name)
+                    continue
+                await self.bot.db.set_game_ping_role(guild.id, g.key, role.id)
+            if not role.mentionable and not me.guild_permissions.mention_everyone:
+                unmentionable.append(role.mention)
+        lines = ["**Crew ping roles**"]
+        if matched:
+            lines.append("Matched: " + ", ".join(f"{g.name} → {r.mention}" for g, r in matched))
+        if created:
+            lines.append("Created: " + ", ".join(r.mention for _, r in created))
+        if kept:
+            lines.append("Already set: " + ", ".join(f"{g.name} → {r.mention}" for g, r in kept))
+        if missing:
+            lines.append("No role yet: " + ", ".join(missing)
+                         + ("" if create_missing else ". Run again with create_missing:True to make them."))
+        if failed:
+            lines.append("Couldn't create: " + ", ".join(failed) + ". PlunderBot needs Manage Roles.")
+        if unmentionable:
+            lines.append("Not mentionable, so pings won't go through until you turn on "
+                         "\"Allow anyone to @mention this role\": " + ", ".join(unmentionable))
+        text = "\n".join(lines)
+        await interaction.followup.send(text[:1990], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 async def setup(bot) -> None:

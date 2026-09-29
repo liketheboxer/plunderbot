@@ -17,6 +17,7 @@ COGS = [
     "plunderbot.cogs.core",
     "plunderbot.cogs.admin",
     "plunderbot.cogs.birthdays",
+    "plunderbot.cogs.crew",
 ]
 
 
@@ -64,6 +65,10 @@ class PlunderBot(commands.Bot):
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             log.info("Synced %d commands to guild %s", len(synced), self.config.dev_guild_id)
+            # Clear the app's global commands so nothing shows twice, including any left behind
+            # by whatever used this application before (e.g. MEE6's Bot Personalizer).
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
         else:
             synced = await self.tree.sync()
             log.info("Synced %d global commands", len(synced))

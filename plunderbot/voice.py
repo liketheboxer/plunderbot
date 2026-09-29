@@ -77,6 +77,86 @@ LINES: dict[str, list[str]] = {
     "birthdays_none": [
         "The birthday ledger is empty as a sunk chest! Add yours with `/birthday set`.",
     ],
+    "crew_call": [
+        "Ahoy! {captain} is mustering a crew for {game}. Hop aboard!",
+        "All hands! {captain} needs a crew for {game}. Seats are filling fast!",
+        "Splendid news! {captain} is raising a {size} for {game}. Who's in?",
+    ],
+    "hangout_call": [
+        "{captain} is hanging out in voice for some parallel play. Bring your own game and keep them company!",
+        "Hangout ahoy! {captain} is in voice doing their own thing. Everyone's welcome, whatever you're playing!",
+    ],
+    "hangout_started": [
+        "Your hangout is open and the voice channel is going up now. Enjoy the company!",
+    ],
+    "crew_ping": [
+        "{role}, a crew is forming!",
+        "Calling all {role}! There's a ship that needs you.",
+    ],
+    "crew_started": [
+        "Your crew call is up! I'll set sail the moment it's full, or whenever you press Set Sail.",
+    ],
+    "crew_joined": [
+        "Welcome aboard! Mind the barnacles.",
+        "You're on the manifest! Splendid!",
+        "Aboard and accounted for. {cuss} This is going to be fun!",
+    ],
+    "crew_joined_sailing": [
+        "Welcome aboard! Your crew is already at sea: head to {channel}.",
+    ],
+    "crew_left": [
+        "Off the manifest you go. Fair winds, friend!",
+        "Understood! I've freed your seat for another sailor.",
+    ],
+    "crew_full": [
+        "{cuss} That crew is full to the gunwales. Try another, or start your own with `/crew start`!",
+    ],
+    "crew_already_aboard": [
+        "You're already aboard this one! I'd never lose track of a crewmate.",
+    ],
+    "crew_not_aboard": [
+        "You're not on this crew's manifest, so there's nothing to leave!",
+    ],
+    "crew_captain_leave": [
+        "Captains can't abandon ship! Use Close if the voyage is off.",
+    ],
+    "crew_captain_only": [
+        "{cuss} Only the captain can give that order.",
+    ],
+    "crew_over": [
+        "{cuss} That crew call has already ended. Start a fresh one with `/crew start`!",
+    ],
+    "crew_one_at_a_time": [
+        "{cuss} You're already captaining a crew! Close that one first, or keep sailing with it.",
+    ],
+    "crew_bad_size": [
+        "{cuss} {game} crews come in these sizes: {options}.",
+    ],
+    "crew_bad_activity": [
+        "{cuss} I don't know that one for {game}. Pick from: {options}.",
+    ],
+    "crew_sailing": [
+        "Anchors aweigh! {names}, your voice channel is ready: {channel}",
+        "Hoist the sails! {names}, gather in {channel} and have a splendid voyage!",
+    ],
+    "crew_sailing_no_voice": [
+        "Anchors aweigh, {names}! {cuss} I couldn't open a voice channel, so a Quartermaster should check my permissions.",
+    ],
+    "crew_closed": [
+        "Crew call closed. Back to port we go!",
+    ],
+    "crew_no_threads": [
+        "{cuss} Crew calls need a regular text channel, not a thread. Try the main channel!",
+    ],
+    "crew_cant_post": [
+        "{cuss} I can't post a crew card here. A Quartermaster needs to give me Send Messages and Embed Links in this channel.",
+    ],
+    "crew_none": [
+        "No crews are mustering right now. Start one with `/crew start`!",
+    ],
+    "crew_list_header": [
+        "Crews on the water:",
+    ],
     "guild_only": [
         "{cuss} That order only works aboard the ship, not in private messages.",
     ],
