@@ -369,3 +369,21 @@ async def test_layout_order(env):
             SimpleNamespace(id=4, heading=None, body=None, image="z.png", image_style="banner")]
     assert [(k, [s.id for s in c]) for k, c in layout(secs)] == [
         ("banner", [1]), ("embeds", [1, 2]), ("banner", [3]), ("embeds", [3]), ("banner", [4])]
+
+
+async def test_hidden_messages_explain_the_intent(env):
+    bot, cog, guild = env
+    bot.can_read_messages = False
+    blank = SimpleNamespace(id=1, content="", embeds=[], attachments=[], author=SimpleNamespace(id=0))
+    guild.channels[90] = History([blank])
+    inter = interaction(guild, Member(1))
+    await cog.import_.callback(cog, inter, "https://discord.com/channels/5/90/1")
+    assert "Message Content Intent" in inter.followup.sent[0]
+    assert await bot.db.pages(5) == []
+
+
+def test_message_content_intent_is_requested(tmp_path):
+    from plunderbot.bot import PlunderBot
+    from tests.test_bot import make_config
+    assert PlunderBot(make_config(tmp_path)).intents.message_content
+    assert not PlunderBot(make_config(tmp_path), message_content=False).intents.message_content

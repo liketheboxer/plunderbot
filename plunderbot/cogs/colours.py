@@ -374,8 +374,9 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
                          + [f.value for e in msg.embeds for f in e.fields])
         pairs = parse_import(text)
         if not pairs:
-            hidden = "" if msg.author.id == guild.me.id else (
-                " If another bot posted it, Discord may be hiding its text from me.")
+            hidden = "" if getattr(self.bot, "can_read_messages", True) else (
+                " Discord may be hiding its text from me: turn on Message Content Intent in the Developer "
+                "Portal (PlunderBot › Bot) and refit.")
             await interaction.followup.send(
                 "I didn't find any role mentions in that message, so there's nothing to copy." + hidden +
                 " Build it with /colours create and /colours add instead.", ephemeral=True)

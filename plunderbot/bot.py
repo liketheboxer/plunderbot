@@ -46,9 +46,13 @@ class PlunderTree(app_commands.CommandTree):
 
 
 class PlunderBot(commands.Bot):
-    def __init__(self, config: Config, telemetry=None):
+    def __init__(self, config: Config, telemetry=None, message_content: bool = True):
         intents = discord.Intents.default()
         intents.members = True  # welcomes, birthday roles; needs "Server Members Intent" in the portal
+        # Reading other messages' text and embeds (importing old MEE6 posts; later Parley and Articles).
+        # Needs "Message Content Intent" in the portal; bot.py falls back without it if that's off.
+        intents.message_content = message_content
+        self.can_read_messages = message_content
         super().__init__(
             command_prefix=commands.when_mentioned,  # slash commands only; no prefix commands
             intents=intents,

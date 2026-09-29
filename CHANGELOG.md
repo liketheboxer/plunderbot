@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2 (2026-09-29): Reading old posts
+
+- PlunderBot asks for Discord's Message Content Intent so it can read posts made by other apps (such as MEE6's welcome and rules) when importing them. It's also needed later for Parley and Articles. If the intent is off in the Developer Portal, PlunderBot starts without it and says so in its log.
+- `/noticeboard import` and `/colours import` explain when messages look empty because of that setting, instead of importing only the parts they can see.
+
 ## 0.5.1 (2026-09-29): Importing picture-and-text posts
 
 - `/noticeboard import` takes an optional `through` link to copy a whole run of messages (up to 50), such as MEE6's welcome post of banner, text, banner, text.

@@ -94,7 +94,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 ### 1. Discord application
 
 1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application named **PlunderBot** and give it an avatar.
-2. **Bot** tab: turn on **Server Members Intent**. Leave Presence and Message Content off for now.
+2. **Bot** tab: turn on **Server Members Intent** and **Message Content Intent** (for importing old posts, and later Parley and Articles). Leave Presence off.
 3. **Bot** tab: **Reset Token** and keep the token for step 3. Never paste it in chat or commit it.
 4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**, **Kick Members**, **Read Message History**, **Add Reactions**, **Attach Files**, **Manage Threads**. Open the URL and add PlunderBot to Brimstone Hill Fortress.
 5. In **Server Settings › Roles**, drag PlunderBot's role **above** any role it should hand out (the birthday role now, the Colours roles later).

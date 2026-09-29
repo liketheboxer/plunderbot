@@ -340,12 +340,18 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
                 return
         else:
             p = None
+        blank = [m for m in messages if not (m.content or m.embeds or m.attachments)]
+        if blank and not getattr(self.bot, "can_read_messages", True):
+            await interaction.followup.send(
+                f"{len(blank)} of those {len(messages)} message(s) look empty to me, because Discord hides other "
+                "apps' messages unless **Message Content Intent** is on. Turn it on in the Discord Developer "
+                "Portal (PlunderBot › Bot › Privileged Gateway Intents), refit PlunderBot, and import again.",
+                ephemeral=True)
+            return
         parts = split_parts(messages)
         plans = plan_sections(parts)
         if not plans:
-            hidden = "" if first.author.id == guild.me.id else (
-                " If another bot posted it, Discord may be hiding its text from me.")
-            await interaction.followup.send(f"There was nothing I could copy there.{hidden}", ephemeral=True)
+            await interaction.followup.send("There was nothing I could copy there.", ephemeral=True)
             return
         if p is None:
             title = next((t["text"]["heading"] for t in plans if t["text"] and t["text"]["heading"]), None) \
@@ -377,6 +383,8 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
             added += 1
         lines = [f"Copied {len(messages)} message(s) into {added} section(s) on **{p.title}** (key `{p.key}`). "
                  "The old messages are untouched."]
+        if blank:
+            lines.append(f"{len(blank)} message(s) had nothing I could read.")
         if missed:
             lines.append("I couldn't copy " + ", ".join(missed) + ". Save the picture and add it with "
                          "/noticeboard section image.")
