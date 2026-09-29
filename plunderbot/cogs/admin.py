@@ -13,6 +13,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from .. import crew_emoji, games
+from ..region_logic import guess_zone
+from ..voyage_logic import zone_from_name
 from ..crew_logic import voice_channel_name
 from ..birthday_logic import valid_timezone
 
@@ -39,6 +41,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
     birthdays = app_commands.Group(name="birthdays", description="Birthday announcement settings")
     crew = app_commands.Group(name="crew", description="Crew Call settings")
     voyages = app_commands.Group(name="voyages", description="Voyage settings")
+    regions = app_commands.Group(name="regions", description="Region roles that set members' time zones")
 
     def __init__(self, bot):
         self.bot = bot
@@ -60,7 +63,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
             f"**PlunderBot {self.bot.version} settings**\n"
             f"Time zone: {tz}\n"
             f"Birthday channel: {channel}\n"
-            f"Birthday announcement time: {_hour_label(s.birthday_hour)}\n"
+            f"Birthday announcement time: {_hour_label(s.birthday_hour)} {s.timezone or self.bot.config.default_timezone}\n"
             f"Birthday role: {role}\n"
             f"Birthdays on file: {count}\n"
             f"Crew cards: {crew_cards}\n"
@@ -106,7 +109,10 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
     async def birthday_hour(self, interaction: discord.Interaction,
                             hour: app_commands.Range[int, 0, 23]) -> None:
         await self.bot.db.update_settings(interaction.guild_id, birthday_hour=hour)
-        await interaction.response.send_message(f"Birthday toasts will go out at {_hour_label(hour)}.",
+        s = await self.bot.db.get_settings(interaction.guild_id)
+        await interaction.response.send_message(
+            f"Birthday toasts will go out at {_hour_label(hour)} {s.timezone or self.bot.config.default_timezone} "
+            "(the server's time zone, set with /admin timezone).",
                                                 ephemeral=True)
 
     @birthdays.command(name="role", description="A role members wear on their birthday (leave empty to turn off)")
@@ -336,6 +342,100 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         await self.bot.db.update_settings(interaction.guild_id, voyage_channel_id=channel.id if channel else None)
         where = channel.mention if channel else "whichever channel /voyage create is used in"
         await interaction.response.send_message(f"Voyage cards will be posted in {where}.", ephemeral=True)
+
+    # ------------------------------------------------------------ regions
+    async def _sync_regions(self, guild) -> str:
+        cog = self.bot.get_cog("Regions")
+        if cog is None:
+            return ""
+        r = await cog.sync_guild(guild)
+        text = f"Updated members: {r.set} zone(s) set, {r.cleared} cleared."
+        if r.kept_manual:
+            text += f" {r.kept_manual} member(s) chose their own zone with /timezone set, so theirs stayed."
+        return text
+
+    async def _region_lines(self, guild) -> list[str]:
+        mapping = await self.bot.db.region_zones(guild.id)
+        lines = []
+        for role_id, zone in mapping.items():
+            role = guild.get_role(role_id)
+            if role is not None:
+                lines.append(f"{role.mention} → {zone} ({len(role.members)} member(s))")
+        return lines
+
+    @regions.command(name="auto", description="Match region roles to time zones by name")
+    async def regions_auto(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        await interaction.response.defer(ephemeral=True)
+        current = await self.bot.db.region_zones(guild.id)
+        matched, kept, rough, broad = [], [], [], []
+        for role in guild.roles:
+            if role.is_default() or role.managed:
+                continue
+            guess = guess_zone(role.name)
+            if guess is None:
+                continue
+            if role.id in current:
+                kept.append(f"{role.mention} → {current[role.id]}")
+            elif guess.zone is None:
+                broad.append(f"{role.mention} ({guess.note})")
+            else:
+                await self.bot.db.set_region_zone(guild.id, role.id, guess.zone)
+                matched.append(f"{role.mention} → {guess.zone}")
+                if guess.note:
+                    rough.append(f"{role.mention}: {guess.note}")
+        lines = ["**Region roles → time zones**"]
+        if matched:
+            lines.append("Matched: " + ", ".join(matched))
+        if kept:
+            lines.append("Already set: " + ", ".join(kept))
+        if rough:
+            lines.append("Rough guesses (members can fine-tune with /timezone set): " + "; ".join(rough))
+        if broad:
+            lines.append("Too broad for one zone, so left alone (members set theirs with /timezone set, "
+                         "or map it with /admin regions set): " + ", ".join(broad))
+        if len(lines) == 1:
+            lines.append("No region roles found by name. Map them with /admin regions set.")
+        lines.append(await self._sync_regions(guild))
+        await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True,
+                                        allowed_mentions=discord.AllowedMentions.none())
+
+    @regions.command(name="set", description="Make a role stand for a time zone")
+    @app_commands.describe(role="The region role", zone="e.g. America/Chicago, Europe/London, ET")
+    async def regions_set(self, interaction: discord.Interaction, role: discord.Role, zone: str) -> None:
+        tz = zone_from_name(zone)
+        if tz is None:
+            await interaction.response.send_message(
+                f"I don't know the time zone \"{zone}\". Try one like America/Chicago.", ephemeral=True)
+            return
+        if role.is_default() or role.managed:
+            await interaction.response.send_message("Pick a region role members choose for themselves.",
+                                                    ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self.bot.db.set_region_zone(interaction.guild_id, role.id, tz.key)
+        text = f"{role.mention} now sets members' time zone to {tz.key}.\n" + await self._sync_regions(interaction.guild)
+        await interaction.followup.send(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    @regions_set.autocomplete("zone")
+    async def regions_zone_ac(self, interaction: discord.Interaction, current: str):
+        needle = current.strip().lower().replace(" ", "_")
+        return [app_commands.Choice(name=z, value=z) for z in _ZONES if needle in z.lower()][:25]
+
+    @regions.command(name="clear", description="Stop a role from setting time zones")
+    async def regions_clear(self, interaction: discord.Interaction, role: discord.Role) -> None:
+        await interaction.response.defer(ephemeral=True)
+        await self.bot.db.set_region_zone(interaction.guild_id, role.id, None)
+        text = f"{role.mention} no longer sets time zones.\n" + await self._sync_regions(interaction.guild)
+        await interaction.followup.send(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    @regions.command(name="list", description="Show which region roles set which time zones")
+    async def regions_list(self, interaction: discord.Interaction) -> None:
+        lines = await self._region_lines(interaction.guild)
+        text = "\n".join(["**Region roles → time zones**", *lines]) if lines else \
+            "No region roles are mapped yet. Try /admin regions auto."
+        await interaction.response.send_message(text[:1990], ephemeral=True,
+                                                allowed_mentions=discord.AllowedMentions.none())
 
 
 async def setup(bot) -> None:

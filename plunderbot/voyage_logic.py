@@ -86,6 +86,57 @@ def parse_time(text: str) -> time:
     return time(hour, minute)
 
 
+# Short names people type after a time ("8pm ET"). Summer/winter spellings map to the same zone,
+# which then applies whichever offset is right on that date.
+ZONE_ALIASES = {
+    "pt": "America/Los_Angeles", "pst": "America/Los_Angeles", "pdt": "America/Los_Angeles",
+    "pacific": "America/Los_Angeles",
+    "mt": "America/Denver", "mst": "America/Denver", "mdt": "America/Denver", "mountain": "America/Denver",
+    "az": "America/Phoenix", "arizona": "America/Phoenix",
+    "ct": "America/Chicago", "cst": "America/Chicago", "cdt": "America/Chicago", "central": "America/Chicago",
+    "et": "America/New_York", "est": "America/New_York", "edt": "America/New_York", "eastern": "America/New_York",
+    "akt": "America/Anchorage", "akst": "America/Anchorage", "akdt": "America/Anchorage",
+    "ht": "Pacific/Honolulu", "hst": "Pacific/Honolulu",
+    "at": "America/Halifax", "ast": "America/Halifax", "adt": "America/Halifax",
+    "utc": "UTC", "gmt": "UTC", "z": "UTC",
+    "uk": "Europe/London", "bst": "Europe/London",
+    "cet": "Europe/Berlin", "cest": "Europe/Berlin",
+    "eet": "Europe/Athens", "eest": "Europe/Athens",
+    "ist": "Asia/Kolkata", "jst": "Asia/Tokyo",
+    "aest": "Australia/Sydney", "aedt": "Australia/Sydney", "acst": "Australia/Adelaide",
+    "awst": "Australia/Perth", "nzst": "Pacific/Auckland", "nzdt": "Pacific/Auckland",
+}
+
+
+def zone_from_name(name: str) -> ZoneInfo | None:
+    """A zone from a short name (ET, PST, UTC) or a full one (America/New_York)."""
+    from zoneinfo import ZoneInfoNotFoundError
+    key = ZONE_ALIASES.get(name.strip().lower(), name.strip())
+    try:
+        return ZoneInfo(key)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
+def split_zone(text: str) -> tuple[str, ZoneInfo | None]:
+    """ "8pm ET" -> ("8pm", New York); "20:00 Europe/London" -> ("20:00", London); "8pm" -> ("8pm", None)."""
+    parts = text.strip().rsplit(" ", 1)
+    if len(parts) == 2:
+        tz = zone_from_name(parts[1])
+        if tz is not None:
+            return parts[0], tz
+        if re.fullmatch(r"[A-Za-z_/]{2,}", parts[1]) and parts[1].lower() not in ("am", "pm"):
+            raise ParseError(f"I don't know the time zone \"{parts[1]}\". Try ET, PT, UTC or a name like "
+                             "Europe/London, or set yours with /timezone set.")
+    return text, None
+
+
+def zone_label(tz: ZoneInfo, when: datetime) -> str:
+    """ "Pacific (PDT)" style label for replies."""
+    abbr = when.astimezone(tz).strftime("%Z")
+    return f"{tz.key} ({abbr})" if abbr and abbr != tz.key else tz.key
+
+
 def to_utc(day: date, at: time, tz: ZoneInfo) -> datetime:
     return datetime.combine(day, at, tzinfo=tz).astimezone(timezone.utc)
 

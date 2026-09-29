@@ -21,7 +21,7 @@ from ..db import Voyage
 from ..mentions import send_pinging
 from ..voyage_logic import (REMINDER_PRESETS, REPEATS, ParseError, Rsvps, due_reminder, format_reminders,
                             is_weekday_name, next_occurrence, overdue_reminders, parse_date, parse_reminders,
-                            parse_time, placement, render_voyage, to_utc)
+                            parse_time, placement, render_voyage, split_zone, to_utc, zone_label)
 
 log = logging.getLogger("plunderbot.voyages")
 
@@ -92,6 +92,15 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
     async def tz(self, guild_id: int):
         settings = await self.bot.db.get_settings(guild_id)
         return zone(settings.timezone, self.bot.config.default_timezone)
+
+    async def reading_zone(self, user_id: int, guild_id: int):
+        """The zone to read a member's typed times in: theirs if they've set one, else the server's.
+        Returns (zone, whose) where whose is "yours" or "server"."""
+        mine = await self.bot.db.member_timezone(user_id)
+        if mine:
+            tz = zone(mine, self.bot.config.default_timezone)
+            return tz, "yours"
+        return await self.tz(guild_id), "server"
 
     async def emoji(self, v: Voyage) -> str:
         profile = games.get(v.game_key)
@@ -192,7 +201,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
     @app_commands.describe(
         title="What it's called, e.g. Friday Fort Night",
         date="friday, tomorrow, 10/3 or 2026-10-03",
-        time="8pm, 8:30pm or 20:30 (server time zone)",
+        time="8pm, 8:30pm or 20:30, in your time zone (/timezone set), or add one: 8pm ET",
         game="The game, or leave empty for a general server event",
         size="Crew size (depends on the game); sets how many can be Aboard",
         seats="Override how many can be Aboard (leave empty for the crew size, or no limit)",
@@ -208,14 +217,17 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                      reminders: str | None = None, repeat: app_commands.Choice[str] | None = None,
                      duration: app_commands.Range[int, 15, 720] = 120) -> None:
         guild = interaction.guild
-        tz = await self.tz(guild.id)
+        tz, whose = await self.reading_zone(interaction.user.id, guild.id)
         profile = games.get(game.value) if game else None
         now = now_utc()
         try:
+            time_text, typed_zone = split_zone(time)
+            if typed_zone is not None:
+                tz, whose = typed_zone, "typed"
             day = parse_date(date, datetime.now(tz).date())
-            starts = to_utc(day, parse_time(time), tz)
+            starts = to_utc(day, parse_time(time_text), tz)
             if starts <= now and is_weekday_name(date):  # "friday" on a Friday evening means next Friday
-                starts = to_utc(day + timedelta(days=7), parse_time(time), tz)
+                starts = to_utc(day + timedelta(days=7), parse_time(time_text), tz)
             minutes = parse_reminders(reminders)
         except ParseError as e:
             await interaction.response.send_message(voice.say("voyage_bad_input", error=str(e)), ephemeral=True)
@@ -259,8 +271,21 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             await self.bot.db.update_voyage(v.id, status="cancelled")
             await interaction.followup.send(voice.say("crew_cant_post"), ephemeral=True)
             return
-        await interaction.followup.send(voice.say("voyage_created", link=_link(v),
-                                                  reminders=format_reminders(minutes)), ephemeral=True)
+        await interaction.followup.send(
+            voice.say("voyage_created", link=_link(v), reminders=format_reminders(minutes),
+                      when=f"<t:{int(starts.timestamp())}:F>")
+            + "\n" + self.zone_note(tz, whose, starts), ephemeral=True)
+
+    @staticmethod
+    def zone_note(tz, whose: str, starts: datetime) -> str:
+        """Tell the organizer which time zone their typed time was read in, so a mix-up is obvious."""
+        label = zone_label(tz, starts)
+        if whose == "server":
+            return (f"I read your time as {label}, the server's time zone. Everyone sees it in their own time. "
+                    "If you're elsewhere, set yours once with `/timezone set`, or add a zone like `8pm ET`.")
+        if whose == "typed":
+            return f"I read your time as {label}. Everyone sees it in their own time."
+        return f"I read your time as {label}, your saved time zone. Everyone sees it in their own time."
 
     @create.autocomplete("size")
     async def size_ac(self, interaction: discord.Interaction, current: str):
@@ -282,12 +307,13 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         return options[:25]
 
     async def _manageable(self, interaction: discord.Interaction, current: str):
-        tz = await self.tz(interaction.guild_id)
+        # Autocomplete can't show Discord timestamps, so write the time in the member's own zone.
+        tz, _ = await self.reading_zone(interaction.user.id, interaction.guild_id)
         out = []
         for v in await self.bot.db.voyages_with_status("scheduled", guild_id=interaction.guild_id):
             if not _can_manage(interaction.user, v) or current.lower() not in v.title.lower():
                 continue
-            when = datetime.fromisoformat(v.starts_at).astimezone(tz).strftime("%a %b %-d, %-I:%M %p")
+            when = datetime.fromisoformat(v.starts_at).astimezone(tz).strftime("%a %b %-d, %-I:%M %p %Z")
             out.append(app_commands.Choice(name=f"{v.title[:70]} ({when})", value=str(v.id)))
         return out[:25]
 
@@ -312,13 +338,18 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         v = await self._fetch_manageable(interaction, voyage)
         if v is None:
             return
-        tz = await self.tz(v.guild_id)
+        tz, whose = await self.reading_zone(interaction.user.id, v.guild_id)
         changes: dict = {}
+        starts = None
         try:
             if date or time:
+                if time:
+                    time_text, typed_zone = split_zone(time)
+                    if typed_zone is not None:
+                        tz, whose = typed_zone, "typed"
                 local = datetime.fromisoformat(v.starts_at).astimezone(tz)
                 day = parse_date(date, datetime.now(tz).date()) if date else local.date()
-                at = parse_time(time) if time else local.time().replace(tzinfo=None)
+                at = parse_time(time_text) if time else local.time().replace(tzinfo=None)
                 starts = to_utc(day, at, tz)
                 if starts <= now_utc() + timedelta(minutes=1):
                     await interaction.response.send_message(voice.say("voyage_bad_time"), ephemeral=True)
@@ -352,7 +383,11 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         await self.refresh(interaction.guild, v)
         await self.sync_event(interaction.guild, v)
         await self._announce_promotions(interaction.guild, v, promoted)
-        await interaction.followup.send(voice.say("voyage_edited", link=_link(v)), ephemeral=True)
+        stamp = int(datetime.fromisoformat(v.starts_at).timestamp())
+        text = voice.say("voyage_edited", link=_link(v), when=f"<t:{stamp}:F>")
+        if starts is not None:
+            text += "\n" + self.zone_note(tz, whose, starts)
+        await interaction.followup.send(text, ephemeral=True)
 
     async def _reset_reminder_baseline(self, voyage_id: int) -> None:
         # created_at is the "don't fire reminders due before this" line; moving it to now stops an edit

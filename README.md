@@ -9,6 +9,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | Command | Who | What it does |
 |---|---|---|
 | `/plunderbot` | Everyone | Meet the butler; shows the version |
+| `/timezone set` | Everyone | Save your time zone (Pacific, ET, Europe/London…) so the times you type are read correctly. `/timezone show` and `/timezone clear` too |
 | `/birthday set` | Everyone | Save your month and day (no year). After the first hour, you can change it once every 30 days |
 | `/birthday mine` | Everyone | See what PlunderBot has for you |
 | `/birthday remove` | Everyone | Take your birthday off the ledger |
@@ -23,6 +24,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/voyage list` | Everyone | Upcoming voyages |
 | `/admin settings` | Manage Server | Show this server's settings |
 | `/admin timezone` | Manage Server | Server time zone (default America/Los_Angeles) |
+| `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
 | `/admin birthdays hour` | Manage Server | Hour the toast goes out, 0 to 23 (default 9 = 9:00 AM) |
 | `/admin birthdays role` | Manage Server | Optional role worn for the day. Must be cosmetic, below PlunderBot's role, and below yours |
@@ -39,6 +41,8 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 
 ### How Voyages work
 
+- Picking a region role (e.g. North America - East) sets your time zone to match, whichever bot hands out the role. A zone you choose with `/timezone set` always wins; `/timezone clear` falls back to your region role.
+- Times are typed in your own time zone (`/timezone set` or your region role), or with a zone added (`8pm ET`); without either, the server's zone is used and the confirmation says so. Every time PlunderBot shows is a Discord timestamp, which each member sees in their own local time.
 - The card has **Aboard**, **Maybe** and **Can't make it**. Pressing your current answer clears it. When the seats are full, Aboard goes on a waitlist, and the first in line is moved up (and pinged) when a seat opens.
 - Each voyage gets a matching Discord Event in the server's Events list, kept in step with edits and cancellations.
 - Reminders ping everyone Aboard or Maybe. Reminders whose time had passed when the voyage was made are skipped.

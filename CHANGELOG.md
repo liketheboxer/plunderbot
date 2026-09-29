@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.2 (2026-09-29): Region roles set time zones
+
+- Region roles now stand for time zones: picking "North America - East" (from the existing reaction menu, or PlunderBot's own menus and onboarding in phase 4) saves Eastern time for that member.
+- `/admin regions auto` matches region roles to zones by name; `set`, `clear` and `list` adjust them. Regions too broad for one zone (Asia, South/Central America) are left for members to set themselves.
+- Members who already hold a region role are filled in when the mapping changes and whenever PlunderBot starts.
+- A zone chosen with `/timezone set` is never overwritten by a role. `/timezone show` says when a zone came from a region role; `/timezone clear` falls back to it.
+
+## 0.3.1 (2026-09-29): Time zones
+
+- Members can save their own time zone with `/timezone set` (Pacific, ET, America/Chicago…), and check or clear it with `/timezone show` and `/timezone clear`.
+- Times typed into `/voyage create` and `/voyage edit` are read in the member's own time zone, or in a zone typed with the time (`8pm ET`, `20:00 Europe/London`), falling back to the server's.
+- Every time PlunderBot shows is a Discord timestamp, so each member sees it in their own time. The organizer's confirmation shows the time and which zone their typing was read in.
+- Autocomplete lists (which can't show timestamps) write times in the member's own zone, with its abbreviation.
+
 ## 0.3.0 (2026-09-29): Voyages
 
 Phase 3 of 9. Replaces Apollo.

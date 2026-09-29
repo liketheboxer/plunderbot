@@ -381,3 +381,50 @@ async def test_voyage_crew_card_goes_to_the_crew_channel(env):
     edits = text.get_partial_message(v.message_id).edits
     crew_field = [f for f in edits[-1]["embed"].fields if f.name == "Crew"]
     assert crew_field and "/30/" in crew_field[0].value
+
+
+# ------------------------------------------------------------ time zones
+def test_typed_zones():
+    from plunderbot.voyage_logic import split_zone, zone_label
+    assert split_zone("8pm") == ("8pm", None)
+    t, tz = split_zone("8pm ET")
+    assert t == "8pm" and tz.key == "America/New_York"
+    assert split_zone("20:00 Europe/London")[1].key == "Europe/London"
+    assert split_zone("8 pm")[1] is None and split_zone("8 pm")[0] == "8 pm"
+    with pytest.raises(ParseError):
+        split_zone("8pm Narnia")
+    assert zone_label(ZoneInfo("America/Los_Angeles"), datetime(2026, 7, 1, tzinfo=timezone.utc)) == \
+        "America/Los_Angeles (PDT)"
+
+
+async def test_times_are_read_in_the_members_zone(env):
+    bot, cog, guild, text = env
+    await bot.db.set_member_timezone(1, "America/New_York")
+    inter = await make_voyage(cog, guild, date="2026-12-24", time="8pm")
+    (v,) = await bot.db.voyages_with_status("scheduled")
+    assert datetime.fromisoformat(v.starts_at) == datetime(2026, 12, 25, 1, 0, tzinfo=timezone.utc)
+    assert "<t:" in inter.followup.sent[0] and "your saved time zone" in inter.followup.sent[0]
+    # A zone typed with the time beats the saved one.
+    await cog.cancel.callback(cog, organizer(guild), voyage=str(v.id), whole_series=True)
+    inter = await make_voyage(cog, guild, date="2026-12-24", time="8pm PT")
+    (v,) = await bot.db.voyages_with_status("scheduled")
+    assert datetime.fromisoformat(v.starts_at) == datetime(2026, 12, 25, 4, 0, tzinfo=timezone.utc)
+    # Without a saved zone, the server's is used and the reply says so.
+    await bot.db.set_member_timezone(1, None)
+    await cog.edit.callback(cog, organizer(guild), voyage=str(v.id), time="9pm")
+    v = await bot.db.get_voyage(v.id)
+    assert datetime.fromisoformat(v.starts_at) == datetime(2026, 12, 25, 5, 0, tzinfo=timezone.utc)
+
+
+async def test_timezone_commands(env):
+    bot, cog, guild, text = env
+    core = bot.get_cog("Core")
+    inter = interaction_for(guild, 5)
+    await core.tz_set.callback(core, inter, zone="ET")
+    assert await bot.db.member_timezone(5) == "America/New_York"
+    bad = interaction_for(guild, 5)
+    await core.tz_set.callback(core, bad, zone="Narnia")
+    assert "don't know" in bad.response.messages[0]
+    choices = await core.tz_ac.callback(core, inter, "chicago") if hasattr(core.tz_ac, "callback") else \
+        await core.tz_ac(inter, "chicago")
+    assert any(c.value == "America/Chicago" for c in choices)

@@ -144,6 +144,23 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE guild_settings ADD COLUMN crew_channel_id INTEGER;
     """,
+    # 8: each member's own time zone, used to read the times they type
+    """
+    CREATE TABLE member_timezones (
+        user_id  INTEGER PRIMARY KEY,
+        timezone TEXT NOT NULL
+    );
+    """,
+    # 9: region roles stand for time zones; remember whether a member's zone came from one
+    """
+    ALTER TABLE member_timezones ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';
+    CREATE TABLE region_zones (
+        guild_id INTEGER NOT NULL,
+        role_id  INTEGER NOT NULL,
+        timezone TEXT NOT NULL,
+        PRIMARY KEY (guild_id, role_id)
+    );
+    """,
 ]
 
 
@@ -527,4 +544,42 @@ class Database:
                 "ON CONFLICT (voyage_id, user_id) DO UPDATE SET status = excluded.status, "
                 "updated_at = excluded.updated_at",
                 (voyage_id, user_id, status, at))
+        await self.conn.commit()
+
+    # ------------------------------------------------------------ member time zones
+    async def member_timezone(self, user_id: int) -> str | None:
+        found = await self.member_timezone_source(user_id)
+        return found[0] if found else None
+
+    async def member_timezone_source(self, user_id: int) -> tuple[str, str] | None:
+        """(zone, source) where source is "manual" or "region"."""
+        row = await (await self.conn.execute(
+            "SELECT timezone, source FROM member_timezones WHERE user_id = ?", (user_id,))).fetchone()
+        return (row["timezone"], row["source"]) if row else None
+
+    async def set_member_timezone(self, user_id: int, tz: str | None, source: str = "manual") -> None:
+        if tz is None:
+            await self.conn.execute("DELETE FROM member_timezones WHERE user_id = ?", (user_id,))
+        else:
+            await self.conn.execute(
+                "INSERT INTO member_timezones (user_id, timezone, source) VALUES (?, ?, ?) "
+                "ON CONFLICT (user_id) DO UPDATE SET timezone = excluded.timezone, source = excluded.source",
+                (user_id, tz, source))
+        await self.conn.commit()
+
+    # ------------------------------------------------------------ region roles
+    async def region_zones(self, guild_id: int) -> dict[int, str]:
+        rows = await (await self.conn.execute(
+            "SELECT role_id, timezone FROM region_zones WHERE guild_id = ?", (guild_id,))).fetchall()
+        return {r["role_id"]: r["timezone"] for r in rows}
+
+    async def set_region_zone(self, guild_id: int, role_id: int, tz: str | None) -> None:
+        if tz is None:
+            await self.conn.execute("DELETE FROM region_zones WHERE guild_id = ? AND role_id = ?",
+                                    (guild_id, role_id))
+        else:
+            await self.conn.execute(
+                "INSERT INTO region_zones (guild_id, role_id, timezone) VALUES (?, ?, ?) "
+                "ON CONFLICT (guild_id, role_id) DO UPDATE SET timezone = excluded.timezone",
+                (guild_id, role_id, tz))
         await self.conn.commit()

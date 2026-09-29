@@ -19,6 +19,7 @@ COGS = [
     "plunderbot.cogs.birthdays",
     "plunderbot.cogs.crew",
     "plunderbot.cogs.voyages",
+    "plunderbot.cogs.regions",
 ]
 
 

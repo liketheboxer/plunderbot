@@ -168,7 +168,7 @@ LINES: dict[str, list[str]] = {
         "A voyage is on the charts! {organizer} has scheduled **{title}**. RSVP below, if you please!",
     ],
     "voyage_created": [
-        "Voyage scheduled! Reminders go out {reminders}, and I'll open a voice channel at the start. {link}",
+        "Voyage scheduled for {when}! Reminders go out {reminders}, and I'll open a voice channel at the start. {link}",
     ],
     "voyage_aboard": [
         "You're aboard **{title}**! I'll remind you before we sail.",
@@ -203,7 +203,7 @@ LINES: dict[str, list[str]] = {
         "Voyage cancelled, and everyone who'd answered has been told.",
     ],
     "voyage_edited": [
-        "Voyage updated, and the Discord Event with it. {link}",
+        "Voyage updated, and the Discord Event with it. It's now {when}. {link}",
     ],
     "voyage_nothing_changed": [
         "You didn't give me anything to change! Pick at least one thing to update.",
@@ -228,6 +228,30 @@ LINES: dict[str, list[str]] = {
     ],
     "voyage_list_header": [
         "Voyages on the charts:",
+    ],
+    "tz_saved": [
+        "Got it! I'll read the times you type as {zone}. It's {local} there right now. Everyone else still "
+        "sees times in their own zone.",
+    ],
+    "tz_unknown": [
+        "{cuss} I don't know the time zone \"{zone}\". Try Pacific, ET, America/Chicago or Europe/London.",
+    ],
+    "tz_mine": [
+        "I read the times you type as {zone}. It's {local} there right now.",
+    ],
+    "tz_none": [
+        "You haven't set a time zone, so I read the times you type as the server's: {zone}. "
+        "Set yours with `/timezone set`, or by picking a region role.",
+    ],
+    "tz_mine_region": [
+        "Your region role says {zone}, so that's how I read the times you type. It's {local} there right now. "
+        "Not quite right? Pick your exact zone with `/timezone set`.",
+    ],
+    "tz_cleared_region": [
+        "Forgotten! I'll go by your region role again: {zone}.",
+    ],
+    "tz_cleared": [
+        "Forgotten! I'll read your times in the server's time zone again.",
     ],
     "guild_only": [
         "{cuss} That order only works aboard the ship, not in private messages.",
