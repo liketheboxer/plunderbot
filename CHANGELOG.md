@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 (2026-09-29): Voyages
+
+Phase 3 of 9. Replaces Apollo.
+
+- `/voyage create|edit|cancel|list`: scheduled sessions for any game, or general server events with no game.
+- RSVP card with Aboard, Maybe and Can't make it; seat limits with a waitlist that moves people up automatically.
+- A matching Discord Event for every voyage, updated, started, ended and cancelled along with it.
+- Reminders before the start (default 1 day and 1 hour; each organizer can set their own or turn them off), pinging Aboard and Maybe.
+- At the start the voyage becomes a Crew Call crew: voice channel, crew card for latecomers, pings. The voyage ends when the crew's channel closes.
+- Weekly, every-2-weeks and monthly repeats that keep the local time across daylight saving.
+- `/admin voyages channel` to post every voyage card in one channel, and `/admin crew channel` for every crew card, including voyages once they set sail.
+- Pings to large groups are split across messages to stay under Discord's limits; big crew cards list a few open seats and a count.
+- New gauge: `voyages_scheduled`.
+
 ## 0.2.1 (2026-09-29): Crew emoji and session names
 
 - Captains can name a session with `/crew start name:` or `/crew rename`; the name goes on the card and the voice channel ("⛵ | Fort Night").

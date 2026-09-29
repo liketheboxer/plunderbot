@@ -24,6 +24,7 @@ class GameProfile:
     sizes: tuple[CrewSize, ...]
     tags: tuple[str, ...]
     open_ended: bool = False  # no crew size: a hangout anyone can join, with its voice channel up at once
+    crew_call: bool = True    # offered in /crew start (False: only used by Voyages)
 
     @property
     def default_size(self) -> CrewSize:
@@ -87,6 +88,8 @@ GAMES: tuple[GameProfile, ...] = (
     GameProfile("lethal", "Lethal Company", "Lethal Company", _upto(4), ("Quota run",)),
     GameProfile("hangout", "1 Player Hangout", "Hangout", (CrewSize("Hangout", OPEN_CAPACITY),),
                 ("Parallel play", "Just chatting", "Watch party"), open_ended=True),
+    GameProfile("event", "Server event", "Event", (CrewSize("Event", OPEN_CAPACITY),),
+                ("Movie night", "Game night", "Meeting", "Hangout"), open_ended=True, crew_call=False),
 )
 
 BY_KEY: dict[str, GameProfile] = {g.key: g for g in GAMES}

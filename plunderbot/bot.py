@@ -18,6 +18,7 @@ COGS = [
     "plunderbot.cogs.admin",
     "plunderbot.cogs.birthdays",
     "plunderbot.cogs.crew",
+    "plunderbot.cogs.voyages",
 ]
 
 

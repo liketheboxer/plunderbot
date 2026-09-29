@@ -11,7 +11,8 @@ def test_every_line_fills_in(key):
     # Every placeholder any line might use, so a typo'd field fails here, not in Discord.
     values = dict(version="1.2.3", date="May 4", month_name="February", day=30, names="@Twiddles",
                   captain="@Boxer", game="Sea of Thieves", size="Galleon", role="@SoT", channel="#voice",
-                  options="Sloop, Galleon")
+                  options="Sloop, Galleon", organizer="@Boxer", title="Fort Night", link="https://x",
+                  reminders="1 day, 1 hour before", error="Bad date.", when="in 1 hour")
     fields = {f for line in voice.LINES[key] for _, f, _, _ in string.Formatter().parse(line) if f}
     assert fields <= set(values) | {"cuss"}, f"{key} uses unknown fields: {fields - set(values)}"
     for i in range(len(voice.LINES[key]) * 4):

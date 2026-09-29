@@ -14,10 +14,11 @@ from .. import crew_emoji, games, voice
 from ..crew_logic import (PING_COOLDOWN, clean_title, expired, iso, now_utc, render_card, voice_channel_name,
                           voice_cleanup_due)
 from ..db import Crew
+from ..mentions import send_pinging
 
 log = logging.getLogger("plunderbot.crew")
 
-GAME_CHOICES = [app_commands.Choice(name=g.name, value=g.key) for g in games.GAMES]
+GAME_CHOICES = [app_commands.Choice(name=g.name, value=g.key) for g in games.GAMES if g.crew_call]
 BUTTONS = {
     "join": ("Join", discord.ButtonStyle.success),
     "leave": ("Leave", discord.ButtonStyle.secondary),
@@ -70,8 +71,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
     def __init__(self, bot):
         self.bot = bot
         self.lock = asyncio.Lock()  # serialises every crew change
-        self.last_ping: dict[tuple[int, str], object] = {}
-        self._background: set[asyncio.Task] = set()  # (guild, game) -> when its role was last pinged
+        self.last_ping: dict[tuple[int, str], object] = {}  # (guild, game) -> when its role was last pinged
+        self._background: set[asyncio.Task] = set()
         super().__init__()
 
     async def cog_load(self) -> None:
@@ -103,7 +104,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             await interaction.response.send_message(voice.say(
                 "crew_bad_activity", game=profile.name, options=", ".join(profile.tags)), ephemeral=True)
             return
-        channel = interaction.channel
+        settings = await self.bot.db.get_settings(interaction.guild_id)
+        channel = self.crew_channel(interaction.guild, settings) or interaction.channel
         if isinstance(channel, discord.Thread):
             await interaction.response.send_message(voice.say("crew_no_threads"), ephemeral=True)
             return
@@ -146,8 +148,45 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             await interaction.followup.send(voice.say("crew_cant_post"), ephemeral=True)
             return
         await self.bot.db.update_crew(crew.id, message_id=message.id)
+        if channel.id != getattr(interaction.channel, "id", None):
+            try:
+                await interaction.followup.send(voice.say("crew_posted_there", link=message.jump_url), ephemeral=True)
+            except discord.HTTPException:
+                pass
         if profile.open_ended or crew.full:  # a hangout opens its voice channel straight away
             await self.sail(interaction.guild, crew.id)
+
+    @staticmethod
+    def crew_channel(guild: discord.Guild, settings):
+        """The channel set with /admin crew channel, if it still exists."""
+        if not settings.crew_channel_id:
+            return None
+        channel = guild.get_channel(settings.crew_channel_id)
+        return channel if isinstance(channel, discord.TextChannel) else None
+
+    async def launch_for_voyage(self, guild: discord.Guild, channel, *, captain_id: int, profile, size_label: str,
+                                capacity: int, members: list[int], title: str, note: str | None) -> Crew | None:
+        """Turn a Voyage that's starting into a crew: its Aboard list becomes the crew, a crew card goes
+        up with Join/Leave for late arrivals, and it sets sail straight away (voice channel and ping)."""
+        now = now_utc()
+        async with self.lock:
+            crew = await self.bot.db.create_crew(
+                guild_id=guild.id, channel_id=channel.id, captain_id=captain_id, game_key=profile.key,
+                size_label=size_label, capacity=max(capacity, len(members), 1), activity=None, note=note,
+                created_at=iso(now), expires_at=iso(now + timedelta(hours=1)), title=clean_title(title))
+            for uid in members:
+                if uid != captain_id:
+                    await self.bot.db.add_crew_member(crew.id, uid, iso(now))
+            crew = await self.bot.db.get_crew(crew.id)
+        try:
+            _, card_emoji = await self.emoji_for(guild.id, profile, crew.size_label)
+            message = await channel.send(embed=render_card(crew, profile, card_emoji), view=card_view(crew),
+                                         allowed_mentions=discord.AllowedMentions.none())
+            await self.bot.db.update_crew(crew.id, message_id=message.id)
+        except discord.HTTPException as e:
+            log.warning("Couldn't post the crew card for a voyage: %s", e)
+        await self.sail(guild, crew.id)
+        return await self.bot.db.get_crew(crew.id)
 
     @start.autocomplete("size")
     async def size_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -316,12 +355,10 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
                 return
         await self.refresh_card(guild, crew)
         if card_channel is not None:
-            names = voice.join_names([f"<@{m}>" for m in crew.members])
             key = "crew_sailing" if vc else "crew_sailing_no_voice"
+            line = voice.say(key, names="{names}", channel=vc.mention if vc else "")
             try:
-                await card_channel.send(voice.say(key, names=names, channel=vc.mention if vc else ""),
-                                        allowed_mentions=discord.AllowedMentions(
-                                            users=[discord.Object(m) for m in crew.members]))
+                await send_pinging(card_channel, lambda names: line.replace("{names}", names), crew.members)
             except discord.HTTPException as e:
                 log.warning("Couldn't announce sailing for crew %s: %s", crew.id, e)
 
@@ -331,6 +368,12 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             if crew is None or not crew.active:
                 return
             crew = await self.bot.db.update_crew(crew.id, status=status, ended_at=iso(now_utc()))
+        voyages = self.bot.get_cog("Voyages")
+        if voyages is not None:  # a crew launched by a voyage ends that voyage too
+            try:
+                await voyages.on_crew_ended(guild, crew)
+            except Exception:
+                log.exception("Couldn't end the voyage for crew %s", crew.id)
         if crew.voice_channel_id and guild is not None:
             vc = guild.get_channel(crew.voice_channel_id)
             if vc is None:

@@ -38,6 +38,7 @@ def _hour_label(hour: int) -> str:
 class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot settings for Quartermasters"):
     birthdays = app_commands.Group(name="birthdays", description="Birthday announcement settings")
     crew = app_commands.Group(name="crew", description="Crew Call settings")
+    voyages = app_commands.Group(name="voyages", description="Voyage settings")
 
     def __init__(self, bot):
         self.bot = bot
@@ -52,6 +53,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         role = f"<@&{s.birthday_role_id}>" if s.birthday_role_id else "none"
         count = len(await self.bot.db.birthdays(interaction.guild_id))
         category = f"<#{s.crew_category_id}>" if s.crew_category_id else "same category as the crew card"
+        crew_cards = f"<#{s.crew_channel_id}>" if s.crew_channel_id else "wherever /crew start is used"
         pings = await self.bot.db.game_ping_roles(interaction.guild_id)
         ping_text = ", ".join(f"{games.get(k).name if games.get(k) else k} <@&{r}>" for k, r in sorted(pings.items()))
         text = (
@@ -61,10 +63,12 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
             f"Birthday announcement time: {_hour_label(s.birthday_hour)}\n"
             f"Birthday role: {role}\n"
             f"Birthdays on file: {count}\n"
+            f"Crew cards: {crew_cards}\n"
             f"Crew voice channels: {category}\n"
             f"Empty crew voice channels removed after: {s.crew_cleanup_minutes} min\n"
             f"Unfilled crew calls expire after: {s.crew_expire_minutes} min\n"
-            f"Crew ping roles: {ping_text or 'none'}"
+            f"Crew ping roles: {ping_text or 'none'}\n"
+            f"Voyage cards: {f'<#{s.voyage_channel_id}>' if s.voyage_channel_id else 'wherever /voyage create is used'}"
         )
         await interaction.response.send_message(text, ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
@@ -154,6 +158,20 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         where = category.name if category else "the same category as each crew card"
         await interaction.response.send_message(f"Crew voice channels will open in {where}.", ephemeral=True)
 
+    @crew.command(name="channel", description="Where every crew card goes, including voyages that set sail (empty: where it's started)")
+    async def crew_channel_cmd(self, interaction: discord.Interaction,
+                               channel: discord.TextChannel | None = None) -> None:
+        if channel is not None:
+            perms = channel.permissions_for(interaction.guild.me)
+            if not (perms.view_channel and perms.send_messages and perms.embed_links):
+                await interaction.response.send_message(
+                    f"I can't post in {channel.mention}. Give PlunderBot View Channel, Send Messages and "
+                    "Embed Links there first.", ephemeral=True)
+                return
+        await self.bot.db.update_settings(interaction.guild_id, crew_channel_id=channel.id if channel else None)
+        where = channel.mention if channel else "whichever channel /crew start is used in (voyages: their own channel)"
+        await interaction.response.send_message(f"Crew cards will be posted in {where}.", ephemeral=True)
+
     @crew.command(name="cleanup", description="Minutes an empty crew voice channel waits before it's removed")
     async def crew_cleanup(self, interaction: discord.Interaction, minutes: app_commands.Range[int, 1, 120]) -> None:
         await self.bot.db.update_settings(interaction.guild_id, crew_cleanup_minutes=minutes)
@@ -195,6 +213,8 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         current = await self.bot.db.game_ping_roles(guild.id)
         matched, kept, created, missing, unmentionable, failed = [], [], [], [], [], []
         for g in games.GAMES:
+            if not g.crew_call:  # "Server event" has no ping role of its own
+                continue
             role = guild.get_role(current[g.key]) if g.key in current else None
             if role is not None:
                 kept.append((g, role))
@@ -301,6 +321,21 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         if current and crew_emoji.is_standard(current):
             options.insert(0, app_commands.Choice(name=current, value=current))
         return options[:25]
+
+    # ------------------------------------------------------------ voyages
+    @voyages.command(name="channel", description="Where voyage cards are posted (leave empty: wherever it's created)")
+    async def voyages_channel(self, interaction: discord.Interaction,
+                              channel: discord.TextChannel | None = None) -> None:
+        if channel is not None:
+            perms = channel.permissions_for(interaction.guild.me)
+            if not (perms.view_channel and perms.send_messages and perms.embed_links):
+                await interaction.response.send_message(
+                    f"I can't post in {channel.mention}. Give PlunderBot View Channel, Send Messages and "
+                    "Embed Links there first.", ephemeral=True)
+                return
+        await self.bot.db.update_settings(interaction.guild_id, voyage_channel_id=channel.id if channel else None)
+        where = channel.mention if channel else "whichever channel /voyage create is used in"
+        await interaction.response.send_message(f"Voyage cards will be posted in {where}.", ephemeral=True)
 
 
 async def setup(bot) -> None:

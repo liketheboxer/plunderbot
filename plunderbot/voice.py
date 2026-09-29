@@ -96,6 +96,9 @@ LINES: dict[str, list[str]] = {
     "crew_started": [
         "Your crew call is up! I'll set sail the moment it's full, or whenever you press Set Sail.",
     ],
+    "crew_posted_there": [
+        "Your crew card is up in the crew channel: {link}",
+    ],
     "crew_joined": [
         "Welcome aboard! Mind the barnacles.",
         "You're on the manifest! Splendid!",
@@ -159,6 +162,72 @@ LINES: dict[str, list[str]] = {
     ],
     "crew_list_header": [
         "Crews on the water:",
+    ],
+    "voyage_posted": [
+        "Hear ye! {organizer} is planning a voyage: **{title}**. Tell the butler if you're aboard!",
+        "A voyage is on the charts! {organizer} has scheduled **{title}**. RSVP below, if you please!",
+    ],
+    "voyage_created": [
+        "Voyage scheduled! Reminders go out {reminders}, and I'll open a voice channel at the start. {link}",
+    ],
+    "voyage_aboard": [
+        "You're aboard **{title}**! I'll remind you before we sail.",
+        "Splendid! One more hand on deck for **{title}**.",
+    ],
+    "voyage_waitlist": [
+        "{cuss} **{title}** is full, so you're on the waitlist. I'll shout the moment a seat opens!",
+    ],
+    "voyage_maybe": [
+        "Marked as maybe for **{title}**. I'll keep you in the loop!",
+    ],
+    "voyage_cant": [
+        "No worries! Marked as can't make it for **{title}**. Next time!",
+    ],
+    "voyage_removed": [
+        "Answer cleared! Pick again any time.",
+    ],
+    "voyage_promoted": [
+        "Good news, {names}! A seat opened up on **{title}** and you're aboard!",
+    ],
+    "voyage_reminder": [
+        "Ahoy {names}! **{title}** sets sail {when}. {link}",
+        "A friendly nudge from your butler, {names}: **{title}** is {when}! {link}",
+    ],
+    "voyage_starting_maybe": [
+        "{names}, **{title}** is starting now! Come aboard in {channel} if you can make it.",
+    ],
+    "voyage_cancelled": [
+        "{cuss} **{title}** has been cancelled. Sorry, {names}!",
+    ],
+    "voyage_cancel_done": [
+        "Voyage cancelled, and everyone who'd answered has been told.",
+    ],
+    "voyage_edited": [
+        "Voyage updated, and the Discord Event with it. {link}",
+    ],
+    "voyage_nothing_changed": [
+        "You didn't give me anything to change! Pick at least one thing to update.",
+    ],
+    "voyage_bad_input": [
+        "{cuss} {error}",
+    ],
+    "voyage_bad_time": [
+        "{cuss} That time is in the past or more than a year away. Pick a time in the future!",
+    ],
+    "voyage_not_yours": [
+        "{cuss} Only the organizer or a Quartermaster can change that voyage.",
+    ],
+    "voyage_none": [
+        "{cuss} I can't find that voyage. It may have already sailed or been cancelled.",
+    ],
+    "voyage_over": [
+        "{cuss} That voyage has already sailed or been cancelled.",
+    ],
+    "voyage_none_upcoming": [
+        "Nothing on the charts yet! Schedule one with `/voyage create`.",
+    ],
+    "voyage_list_header": [
+        "Voyages on the charts:",
     ],
     "guild_only": [
         "{cuss} That order only works aboard the ship, not in private messages.",

@@ -86,12 +86,17 @@ def render_card(crew: Crew, profile: GameProfile, emoji: str | None = None) -> d
     if profile.open_ended:
         return _render_hangout(crew, profile, emoji)
     seats = []
-    for i in range(crew.capacity):
-        if i < len(crew.members):
-            role = " (captain)" if crew.members[i] == crew.captain_id else ""
-            seats.append(f"{i + 1}. <@{crew.members[i]}>{role}")
-        else:
-            seats.append(f"{i + 1}. *open seat*")
+    for i, uid in enumerate(crew.members):
+        role = " (captain)" if uid == crew.captain_id else ""
+        seats.append(f"{i + 1}. <@{uid}>{role}")
+    open_seats = crew.capacity - len(crew.members)
+    shown_open = min(open_seats, 6)  # a big voyage lists a few open seats, then a count
+    seats += [f"{len(crew.members) + k + 1}. *open seat*" for k in range(shown_open)]
+    if open_seats > shown_open:
+        seats.append(f"…and {open_seats - shown_open} more open seats")
+    while len("\n".join(seats)) > 1000 and len(seats) > 2:  # Discord's field limit is 1024
+        seats.pop(-2)
+        seats[-1] = "…and more"
     title = f"{emoji} {crew.title}" if crew.title else f"{emoji} {profile.name}: {crew.size_label}"
     embed = discord.Embed(title=title, colour=STATUS_COLOUR.get(crew.status, discord.Colour.default()))
     if crew.title:

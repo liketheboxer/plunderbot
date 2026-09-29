@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 0.2.0 covers **phases 1 and 2 of 8**: the foundation, Birthdays and Crew Call. The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 0.3.0 covers **phases 1 to 3 of 9**: the foundation, Birthdays, Crew Call and Voyages. The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -17,18 +17,34 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/crew rename` | Captain | Rename your session and its voice channel ("⛵ | Fort Night"); leave empty for the default |
 | `/crew close` | Captain | Close your crew call and its voice channel |
 | `/crew list` | Everyone | Crews mustering or sailing right now |
+| `/voyage create` | Everyone | Schedule a voyage: title, date (friday, tomorrow, 10/3), time (8pm), optional game and size, seats, details, reminders (default 1 day and 1 hour before; e.g. `2d, 3h, 15m` or `none`), repeat (weekly, every 2 weeks, monthly) and length |
+| `/voyage edit` | Organizer or mod | Change the title, date, time, details, reminders or seats |
+| `/voyage cancel` | Organizer or mod | Cancel one voyage, or with `whole_series:True` a repeating series |
+| `/voyage list` | Everyone | Upcoming voyages |
 | `/admin settings` | Manage Server | Show this server's settings |
 | `/admin timezone` | Manage Server | Server time zone (default America/Los_Angeles) |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
 | `/admin birthdays hour` | Manage Server | Hour the toast goes out, 0 to 23 (default 9 = 9:00 AM) |
 | `/admin birthdays role` | Manage Server | Optional role worn for the day. Must be cosmetic, below PlunderBot's role, and below yours |
 | `/admin birthdays off` | Manage Server | Stop toasts |
+| `/admin crew channel` | Manage Server | Where every crew card goes, including voyages when they set sail (e.g. #looking-for-group); empty = where `/crew start` is used |
 | `/admin crew category` | Manage Server | Category for crew voice channels (default: same category as the card) |
 | `/admin crew cleanup` | Manage Server | Minutes an empty crew voice channel waits before it's removed (default 5; always at least 15 before anyone joins) |
 | `/admin crew expire` | Manage Server | Minutes before an unfilled crew call closes (default 60) |
 | `/admin crew autopings` | Manage Server | Match every game to its ping role by name (ignores case, spaces and punctuation); with `create_missing:True`, create mentionable, permission-free roles for games that have none |
 | `/admin crew emoji` | Manage Server | Emoji for a game's crew cards and voice channels, for every size or one size (e.g. separate Sloop, Brigantine and Galleon emoji). Standard emoji or server emoji; `reset` restores the default |
 | `/admin crew pingrole` | Manage Server | Opt-in role pinged when a crew call opens for a game (at most every 15 minutes per game) |
+
+| `/admin voyages channel` | Manage Server | Where voyage cards are posted (e.g. #brimstone-events); empty = wherever `/voyage create` is used |
+
+### How Voyages work
+
+- The card has **Aboard**, **Maybe** and **Can't make it**. Pressing your current answer clears it. When the seats are full, Aboard goes on a waitlist, and the first in line is moved up (and pinged) when a seat opens.
+- Each voyage gets a matching Discord Event in the server's Events list, kept in step with edits and cancellations.
+- Reminders ping everyone Aboard or Maybe. Reminders whose time had passed when the voyage was made are skipped.
+- At the start, Aboard becomes a crew: a crew card goes up for latecomers in the crew channel (and the voyage card links to it), the voice channel opens (named after the voyage, e.g. "🚢 | Fort Night") and the crew is pinged; Maybes get a nudge. When the crew's voice channel closes, the voyage and its Discord Event end.
+- Repeating voyages post the next one when the current one starts. With no game, a voyage is a general server event (🗓️) with no seat limit.
+- Mods are members with Manage Events or Manage Server.
 
 ### How Crew Call works
 

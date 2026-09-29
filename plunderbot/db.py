@@ -106,6 +106,44 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE crews ADD COLUMN title TEXT;
     """,
+    # 6: Voyages (scheduled sessions) and their RSVPs
+    """
+    ALTER TABLE guild_settings ADD COLUMN voyage_channel_id INTEGER;
+    CREATE TABLE voyages (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id       INTEGER NOT NULL,
+        channel_id     INTEGER NOT NULL,
+        message_id     INTEGER,
+        organizer_id   INTEGER NOT NULL,
+        title          TEXT NOT NULL,
+        description    TEXT,
+        game_key       TEXT,
+        size_label     TEXT,
+        capacity       INTEGER,                  -- NULL = no limit
+        starts_at      TEXT NOT NULL,
+        duration_min   INTEGER NOT NULL DEFAULT 120,
+        reminders      TEXT NOT NULL DEFAULT '1440,60',
+        reminders_sent TEXT NOT NULL DEFAULT '',
+        repeat         TEXT NOT NULL DEFAULT 'none',
+        series_id      INTEGER,
+        status         TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled, started, ended, cancelled
+        event_id       INTEGER,
+        crew_id        INTEGER,
+        created_at     TEXT NOT NULL
+    );
+    CREATE INDEX voyages_status ON voyages (status, starts_at);
+    CREATE TABLE voyage_rsvps (
+        voyage_id  INTEGER NOT NULL REFERENCES voyages (id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL,
+        status     TEXT NOT NULL,   -- aboard, maybe, cant, waitlist
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (voyage_id, user_id)
+    );
+    """,
+    # 7: one channel for every crew card (crew calls and voyages that set sail)
+    """
+    ALTER TABLE guild_settings ADD COLUMN crew_channel_id INTEGER;
+    """,
 ]
 
 
@@ -120,11 +158,50 @@ class GuildSettings:
     crew_category_id: int | None = None
     crew_cleanup_minutes: int = 5
     crew_expire_minutes: int = 60
+    voyage_channel_id: int | None = None
+    crew_channel_id: int | None = None
 
 
 _SETTING_COLUMNS = {"timezone", "birthday_channel_id", "birthday_hour", "birthday_role_id",
                     "birthday_last_announced", "crew_category_id", "crew_cleanup_minutes",
-                    "crew_expire_minutes"}
+                    "crew_expire_minutes", "voyage_channel_id", "crew_channel_id"}
+
+
+@dataclass
+class Voyage:
+    id: int
+    guild_id: int
+    channel_id: int
+    message_id: int | None
+    organizer_id: int
+    title: str
+    description: str | None
+    game_key: str | None
+    size_label: str | None
+    capacity: int | None
+    starts_at: str
+    duration_min: int
+    reminders: str
+    reminders_sent: str
+    repeat: str
+    series_id: int | None
+    status: str
+    event_id: int | None
+    crew_id: int | None
+    created_at: str
+
+    @property
+    def reminder_minutes(self) -> list[int]:
+        return [int(x) for x in self.reminders.split(",") if x]
+
+    @property
+    def sent_minutes(self) -> list[int]:
+        return [int(x) for x in self.reminders_sent.split(",") if x]
+
+
+_VOYAGE_COLUMNS = {"channel_id", "message_id", "title", "description", "game_key", "size_label", "capacity",
+                   "starts_at", "duration_min", "reminders", "reminders_sent", "repeat", "series_id", "status",
+                   "event_id", "crew_id"}
 
 
 @dataclass
@@ -391,4 +468,63 @@ class Database:
                 (server, guild_id, game_key, size_label))
         await self.conn.execute(
             "DELETE FROM crew_emoji WHERE standard_emoji IS NULL AND server_emoji IS NULL")
+        await self.conn.commit()
+
+    # ------------------------------------------------------------ voyages
+    async def create_voyage(self, **values) -> "Voyage":
+        cols = ", ".join(values)
+        marks = ", ".join("?" for _ in values)
+        cur = await self.conn.execute(f"INSERT INTO voyages ({cols}) VALUES ({marks})", tuple(values.values()))
+        await self.conn.commit()
+        return await self.get_voyage(cur.lastrowid)
+
+    async def get_voyage(self, voyage_id: int) -> "Voyage | None":
+        row = await (await self.conn.execute("SELECT * FROM voyages WHERE id = ?", (voyage_id,))).fetchone()
+        return Voyage(**{k: row[k] for k in row.keys()}) if row else None
+
+    async def update_voyage(self, voyage_id: int, **values) -> "Voyage | None":
+        bad = set(values) - _VOYAGE_COLUMNS
+        if bad:
+            raise ValueError(f"Unknown voyage fields: {', '.join(sorted(bad))}")
+        if values:
+            cols = ", ".join(f"{k} = ?" for k in values)
+            await self.conn.execute(f"UPDATE voyages SET {cols} WHERE id = ?", (*values.values(), voyage_id))
+            await self.conn.commit()
+        return await self.get_voyage(voyage_id)
+
+    async def voyages_with_status(self, *statuses: str, guild_id: int | None = None) -> list["Voyage"]:
+        marks = ", ".join("?" for _ in statuses)
+        sql = f"SELECT * FROM voyages WHERE status IN ({marks})"
+        args: list = list(statuses)
+        if guild_id is not None:
+            sql += " AND guild_id = ?"
+            args.append(guild_id)
+        rows = await (await self.conn.execute(sql + " ORDER BY starts_at, id", args)).fetchall()
+        return [Voyage(**{k: r[k] for k in r.keys()}) for r in rows]
+
+    async def voyage_by_crew(self, crew_id: int) -> "Voyage | None":
+        row = await (await self.conn.execute("SELECT id FROM voyages WHERE crew_id = ?", (crew_id,))).fetchone()
+        return await self.get_voyage(row["id"]) if row else None
+
+    async def rsvps(self, voyage_id: int):
+        from .voyage_logic import Rsvps
+        rows = await (await self.conn.execute(
+            "SELECT user_id, status FROM voyage_rsvps WHERE voyage_id = ? ORDER BY updated_at, rowid",
+            (voyage_id,))).fetchall()
+        out = Rsvps()
+        for r in rows:
+            getattr(out, r["status"]).append(r["user_id"])
+        return out
+
+    async def set_rsvp(self, voyage_id: int, user_id: int, status: str | None, at: str) -> None:
+        """Record a member's answer; None removes it. Changing answer moves them to the back of that list."""
+        if status is None:
+            await self.conn.execute("DELETE FROM voyage_rsvps WHERE voyage_id = ? AND user_id = ?",
+                                    (voyage_id, user_id))
+        else:
+            await self.conn.execute(
+                "INSERT INTO voyage_rsvps (voyage_id, user_id, status, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT (voyage_id, user_id) DO UPDATE SET status = excluded.status, "
+                "updated_at = excluded.updated_at",
+                (voyage_id, user_id, status, at))
         await self.conn.commit()

@@ -13,8 +13,9 @@ T0 = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)
 
 # ------------------------------------------------------------ profiles
 def test_profiles_are_consistent():
-    assert len(games.GAMES) == 16
-    assert len({g.key for g in games.GAMES}) == 16
+    assert len(games.GAMES) == 17
+    assert len({g.key for g in games.GAMES}) == 17
+    assert sum(g.crew_call for g in games.GAMES) == 16  # "Server event" is only for Voyages
     for g in games.GAMES:
         assert g.sizes and g.tags
         assert g.open_ended or all(2 <= s.capacity <= 25 for s in g.sizes)
@@ -192,6 +193,7 @@ async def crew_env(tmp_path):
     bot.get_cog("Birthdays").announcer.cancel()
     cog = bot.get_cog("CrewCall")
     cog.upkeep.cancel()
+    bot.get_cog("Voyages").clock.cancel()
     text = FakeTextChannel(20)
     guild = FakeGuild(10, text)
     guild.members[1] = SimpleNamespace(id=1, display_name="Boxer")

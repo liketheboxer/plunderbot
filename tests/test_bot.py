@@ -23,18 +23,20 @@ async def bot(tmp_path):
         await b.load_extension(cog)
     b.get_cog("Birthdays").announcer.cancel()  # the real loops need a live Discord connection
     b.get_cog("CrewCall").upkeep.cancel()
+    b.get_cog("Voyages").clock.cancel()
     yield b
     await b.db.close()
 
 
 async def test_command_tree(bot):
     top = {c.name: c for c in bot.tree.get_commands()}
-    assert set(top) == {"plunderbot", "admin", "birthday", "crew"}
+    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage"}
+    assert {c.name for c in top["voyage"].commands} == {"create", "edit", "cancel", "list"}
     admin = top["admin"]
     assert isinstance(admin, app_commands.Group)
     assert admin.guild_only and admin.default_permissions.manage_guild
-    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew"}
-    assert {c.name for c in admin.get_command("crew").commands} == {"category", "cleanup", "expire", "pingrole", "autopings", "emoji"}
+    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages"}
+    assert {c.name for c in admin.get_command("crew").commands} == {"channel", "category", "cleanup", "expire", "pingrole", "autopings", "emoji"}
     assert {c.name for c in top["crew"].commands} == {"start", "close", "list", "rename"}
     bday_admin = admin.get_command("birthdays")
     assert {c.name for c in bday_admin.commands} == {"channel", "hour", "role", "off"}

@@ -29,6 +29,7 @@ DEFAULTS: dict[tuple[str, str], str] = {
     ("lol", ""): "⚔️",
     ("lethal", ""): "📦",
     ("hangout", ""): "🛋️",
+    ("event", ""): "🗓️",
 }
 FALLBACK = "🎮"
 
