@@ -199,7 +199,7 @@ async def test_import_embeds_and_pictures(env, monkeypatch):
     assert [s.heading for s in p.sections] == [None, "Server Rules", None]
     assert p.sections[0].body == "Hello!" and "**Voice**\nNo shouting" in p.sections[1].body
     assert p.sections[1].colour == 0x00FF00 and p.sections[1].image
-    assert "Copied 3 section(s)" in inter.followup.sent[0]
+    assert "into 3 section(s)" in inter.followup.sent[0]
 
 
 async def test_starter_guide(env):
@@ -275,3 +275,97 @@ async def test_onboarding_follow_button(index_env):
     bot, cog, guild, *_ = index_env
     (item,) = await cog.onboarding_items(guild)
     assert item.item.custom_id == "noticeboard:follow"
+
+
+# ------------------------------------------------------------ banners: a picture above each section
+PNG = b"\x89PNG\r\n\x1a\n"
+
+
+def picture_embed(url):
+    e = discord.Embed()
+    e.set_image(url=url)
+    return e
+
+
+class History:
+    """A channel holding MEE6's welcome layout: picture, text, picture, text (one message each)."""
+
+    def __init__(self, messages):
+        self.id = 90
+        self.msgs = {m.id: m for m in messages}
+        for m in messages:
+            m.channel = self
+
+    async def fetch_message(self, mid):
+        return self.msgs[mid]
+
+    async def history(self, after=None, before=None, limit=None, oldest_first=True):
+        for mid in sorted(self.msgs):
+            if after.id < mid < before.id:
+                yield self.msgs[mid]
+
+
+def mee6_welcome():
+    me = SimpleNamespace(id=0)
+    return [SimpleNamespace(id=1, content="", attachments=[], author=me,
+                            embeds=[picture_embed("https://cdn.example/welcome.png")]),
+            SimpleNamespace(id=2, content="", attachments=[], author=me,
+                            embeds=[discord.Embed(title="Welcome to the Brimstone Hill Fortress", description="Ahoy!",
+                                                  colour=0x5F8B4C)]),
+            SimpleNamespace(id=3, content="", attachments=[], author=me,
+                            embeds=[picture_embed("https://cdn.example/rules.png")]),
+            SimpleNamespace(id=4, content="", attachments=[], author=me,
+                            embeds=[discord.Embed(description="The goal of our conduct guidelines...")])]
+
+
+def test_split_and_plan_pair_pictures_with_the_text_below():
+    from plunderbot.page_logic import plan_sections, split_parts
+    plans = plan_sections(split_parts(mee6_welcome()))
+    assert len(plans) == 2
+    assert plans[0]["banner"]["urls"][-1] == "https://cdn.example/welcome.png"
+    assert plans[0]["text"]["heading"].startswith("Welcome") and plans[1]["text"]["body"].startswith("The goal")
+
+
+def test_bare_link_is_not_text():
+    from plunderbot.page_logic import split_parts
+    msg = SimpleNamespace(content="https://cdn.example/x.png", attachments=[],
+                          embeds=[picture_embed("https://cdn.example/x.png")])
+    assert [p["kind"] for p in split_parts([msg])] == ["picture"]
+
+
+async def test_import_a_range_as_banners_and_post_it(env, monkeypatch):
+    bot, cog, guild = env
+    guild.channels[90] = History(mee6_welcome())
+    fetched = []
+
+    async def from_cdn(url):
+        fetched.append(url)
+        return PNG + url.encode()
+
+    monkeypatch.setattr(bot.http, "get_from_cdn", from_cdn)
+    inter = interaction(guild, Member(1))
+    await cog.import_.callback(cog, inter, "https://discord.com/channels/5/90/1",
+                               through="https://discord.com/channels/5/90/4")
+    assert "Copied 4 message(s) into 2 section(s)" in inter.followup.sent[0]
+    p = await bot.db.page_by_key(5, "welcome-to-the-brimstone-hill-fortress")
+    assert [(s.image_style, bool(s.image)) for s in p.sections] == [("banner", True), ("banner", True)]
+    assert p.sections[0].colour == 0x5F8B4C
+
+    ch = guild.channels[70]
+    count, _ = await cog.publish(guild, p, ch)
+    assert count == 4  # picture, text, picture, text: the same layout as the old post
+    msgs = [ch.messages[m].kw for m in ch.live()]
+    assert [("picture" if kw["files"] and not kw["embeds"] else "text") for kw in msgs] == \
+        ["picture", "text", "picture", "text"]
+    assert msgs[1]["embeds"][0].title.startswith("Welcome") and not msgs[1]["embeds"][0].image
+    assert msgs[1]["files"] == []
+
+
+async def test_layout_order(env):
+    from plunderbot.page_logic import layout
+    secs = [SimpleNamespace(id=1, heading="A", body="a", image="x.png", image_style="banner"),
+            SimpleNamespace(id=2, heading="B", body="b", image=None, image_style="inside"),
+            SimpleNamespace(id=3, heading="C", body="c", image="y.png", image_style="banner"),
+            SimpleNamespace(id=4, heading=None, body=None, image="z.png", image_style="banner")]
+    assert [(k, [s.id for s in c]) for k, c in layout(secs)] == [
+        ("banner", [1]), ("embeds", [1, 2]), ("banner", [3]), ("embeds", [3]), ("banner", [4])]

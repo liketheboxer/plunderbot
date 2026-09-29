@@ -26,7 +26,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin timezone` | Manage Server | Server time zone (default America/Los_Angeles) |
 | `/follow` | Everyone | Pick the games you follow: their ping roles, plus their threads in the game forum |
 | `/colours create` | Manage Roles | Role menus: `create`, `add` (role, emoji, label, description), `remove`, `move`, `edit`, `onboarding` (offer it to newcomers), `post`, `preview`, `import` (copy a MEE6 reaction-role message), `list`, `delete` |
-| `/noticeboard create` | Manage Server | Pages: `create`, `section add/edit/image/remove/move` (a pop-up form), `import` (copy an existing message such as the rules), `starter` (a draft Pirate's Guide), `post`, `preview`, `gameindex`, `list`, `delete` |
+| `/noticeboard create` | Manage Server | Pages: `create`, `section add/edit/image/remove/move` (a pop-up form), `import` (copy an existing message, or a run of them with `through`, such as the welcome and rules), `starter` (a draft Pirate's Guide), `post`, `preview`, `gameindex`, `list`, `delete` |
 | `/admin gangplank setup` | Manage Server | Intro channel, Pending role, Harbormasters role, rules and orientation channels, optional alert channel. Then `on`/`off`, `emoji`, `timing`, `status` |
 | `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
@@ -53,7 +53,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 
 ### How the Notice Board works
 
-- A page is a list of sections; each is one embed with a heading, text (Markdown), colour and optional picture. Write them in a pop-up form, or `/noticeboard import` an existing message.
+- A page is a list of sections; each is one embed with a heading, text (Markdown), colour and optional picture, either inside the section or as a banner above it. Write them in a pop-up form, or `/noticeboard import` existing messages (a picture on its own becomes a banner above the text after it).
 - `/noticeboard post` posts the page; posting again edits the same messages in place. Long pages spill over several messages.
 - `/noticeboard gameindex` posts the Game Index: every game with its forum thread and ping role, and a **Follow games** button. Run it again after adding threads or roles.
 

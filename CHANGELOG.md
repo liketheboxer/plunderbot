@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 (2026-09-29): Importing picture-and-text posts
+
+- `/noticeboard import` takes an optional `through` link to copy a whole run of messages (up to 50), such as MEE6's welcome post of banner, text, banner, text.
+- A picture that stands on its own is kept as a banner above the section that follows it, and posted the same way: the picture, then the text.
+- `/noticeboard section image` has a `style` option: a banner above the section, or inside it.
+- Pictures are fetched through Discord's own copy first, and the reply says which ones couldn't be copied. A failed import no longer leaves an empty page behind.
+
 ## 0.5.0 (2026-09-29): Colours and the Notice Board
 
 Phase 4 complete. Replaces MEE6's reaction roles and embed posts.

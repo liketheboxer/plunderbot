@@ -235,6 +235,10 @@ MIGRATIONS: list[str] = [
     );
     ALTER TABLE guild_settings ADD COLUMN forum_channel_id INTEGER;
     """,
+    # 13: a section's picture can sit above it as a banner instead of inside it
+    """
+    ALTER TABLE page_sections ADD COLUMN image_style TEXT NOT NULL DEFAULT 'inside';
+    """,
 ]
 
 
@@ -298,6 +302,7 @@ class PageSection:
     body: str | None = None
     colour: int | None = None
     image: str | None = None
+    image_style: str = "inside"  # inside: at the bottom of the section; banner: on its own, above it
 
 
 @dataclass
@@ -905,22 +910,23 @@ class Database:
         await self.conn.commit()
 
     async def add_section(self, page_id: int, heading: str | None, body: str | None, colour: int | None = None,
-                          image: str | None = None, position: int | None = None) -> PageSection:
+                          image: str | None = None, position: int | None = None,
+                          image_style: str = "inside") -> PageSection:
         page = await self.get_page(page_id)
         count = len(page.sections)
         position = count + 1 if position is None else max(1, min(position, count + 1))
         await self.conn.execute("UPDATE page_sections SET position = position + 1 WHERE page_id = ? AND position >= ?",
                                 (page_id, position))
         cur = await self.conn.execute(
-            "INSERT INTO page_sections (page_id, position, heading, body, colour, image) VALUES (?, ?, ?, ?, ?, ?)",
-            (page_id, position, heading, body, colour, image))
+            "INSERT INTO page_sections (page_id, position, heading, body, colour, image, image_style) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)", (page_id, position, heading, body, colour, image, image_style))
         await self.conn.commit()
         await self._renumber(page_id)
         row = await (await self.conn.execute("SELECT * FROM page_sections WHERE id = ?", (cur.lastrowid,))).fetchone()
         return PageSection(**{k: row[k] for k in row.keys()})
 
     async def update_section(self, section_id: int, **values) -> None:
-        bad = set(values) - {"heading", "body", "colour", "image"}
+        bad = set(values) - {"heading", "body", "colour", "image", "image_style"}
         if bad:
             raise ValueError(f"Unknown section fields: {', '.join(sorted(bad))}")
         cols = ", ".join(f"{k} = ?" for k in values)

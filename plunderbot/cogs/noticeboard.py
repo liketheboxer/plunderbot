@@ -20,8 +20,8 @@ from .. import crew_emoji, games, images, voice
 from ..db import Page, PageSection
 from ..discord_util import fetch_linked, self_serve_problem
 from ..menu_logic import partial_emoji, plan, slug
-from ..page_logic import (BODY_MAX, HEADING_MAX, chunk_lines, colour_text, game_index_lines, group,
-                          image_filename, parse_colour, render_section)
+from ..page_logic import (BODY_MAX, HEADING_MAX, chunk_lines, colour_text, game_index_lines, image_filename,
+                          layout, parse_colour, plan_sections, render_section, split_parts)
 
 log = logging.getLogger("plunderbot.noticeboard")
 
@@ -168,8 +168,9 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
         embeds, files = [], []
         for s in sections:
             path = images.path_of(s.image, self.data_dir)
-            embeds.append(render_section(s, has_image=path is not None))
-            if path is not None:
+            inside = path is not None and s.image_style != "banner"
+            embeds.append(render_section(s, has_image=inside))
+            if inside:
                 files.append(discord.File(path, filename=image_filename(s.id, s.image)))
         return embeds, files
 
@@ -244,10 +245,14 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
         await interaction.response.send_modal(SectionModal(self, p, section=s))
 
     @section.command(name="image", description="Put a picture on a section, or take it off")
-    @app_commands.describe(number="Which section: 1 is the top", image="The picture (leave empty to remove it)")
+    @app_commands.describe(number="Which section: 1 is the top", image="The picture (leave empty to remove it)",
+                           style="Banner: on its own above the section. Inside: at the bottom of the section's box")
+    @app_commands.choices(style=[app_commands.Choice(name="Banner above the section", value="banner"),
+                                 app_commands.Choice(name="Inside the section", value="inside")])
     @app_commands.autocomplete(page=_page_ac)
     async def section_image(self, interaction: discord.Interaction, page: str,
-                            number: app_commands.Range[int, 1, 50], image: discord.Attachment | None = None) -> None:
+                            number: app_commands.Range[int, 1, 50], image: discord.Attachment | None = None,
+                            style: app_commands.Choice[str] | None = None) -> None:
         p = await self._get(interaction, page)
         if p is None:
             return
@@ -262,7 +267,14 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
             except (images.ImageError, discord.HTTPException, OSError):
                 await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
                 return
-        await self.bot.db.update_section(s.id, image=name)
+        changes = {"image": name} if (image is not None or style is None) else {}
+        if style is not None:
+            changes["image_style"] = style.value
+        await self.bot.db.update_section(s.id, **changes)
+        if image is None and style is not None:
+            await interaction.followup.send(f"Section {number}'s picture is now {style.name.lower()}. "
+                                            f"{self.post_hint(p)}", ephemeral=True)
+            return
         what = "Picture added to" if name else "Picture removed from"
         await interaction.followup.send(f"{what} section {number}. {self.post_hint(p)}", ephemeral=True)
 
@@ -294,67 +306,103 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
         await self.bot.db.move_section(p.id, s.id, position)
         await interaction.response.send_message(f"Moved. {self.post_hint(p)}", ephemeral=True)
 
-    @app_commands.command(name="import", description="Copy an existing message (e.g. MEE6's rules) into a page")
-    @app_commands.describe(message="Link to the message (right-click it › Copy Message Link)",
-                           page="Add to this page (default: make a new one)")
+    @app_commands.command(name="import", description="Copy existing messages (e.g. MEE6's welcome and rules) into a page")
+    @app_commands.describe(message="Link to the first message (hover it › ⋯ › Copy Message Link)",
+                           through="Optional: link to the last message, to copy everything from first to last",
+                           page="Leave empty to make a new page, or pick a page to add to")
     @app_commands.autocomplete(page=_page_ac)
-    async def import_(self, interaction: discord.Interaction, message: str, page: str | None = None) -> None:
+    async def import_(self, interaction: discord.Interaction, message: str, through: str | None = None,
+                      page: str | None = None) -> None:
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
-        msg = await fetch_linked(guild, message)
-        if msg is None:
+        first = await fetch_linked(guild, message)
+        if first is None:
             await interaction.followup.send("I couldn't open that message. Check the link and that I can read "
                                             "that channel.", ephemeral=True)
             return
+        messages = [first]
+        if through:
+            last = await fetch_linked(guild, through)
+            if last is None or last.channel.id != first.channel.id or last.id < first.id:
+                await interaction.followup.send("The `through` link has to be a later message in the same channel.",
+                                                ephemeral=True)
+                return
+            if last.id != first.id:
+                between = [m async for m in first.channel.history(after=first, before=last, limit=48,
+                                                                   oldest_first=True)]
+                messages += between + [last]
         if page:
             p = await self.bot.db.page_by_key(guild.id, page)
             if p is None or p.kind != "custom":
-                await interaction.followup.send(f"There's no page called \"{page}\" I can add to.", ephemeral=True)
+                await interaction.followup.send(
+                    f"There's no page called \"{page}\" to add to. Leave `page` empty to make a new one.",
+                    ephemeral=True)
                 return
         else:
-            title = next((e.title for e in msg.embeds if e.title), None) or "Imported page"
+            p = None
+        parts = split_parts(messages)
+        plans = plan_sections(parts)
+        if not plans:
+            hidden = "" if first.author.id == guild.me.id else (
+                " If another bot posted it, Discord may be hiding its text from me.")
+            await interaction.followup.send(f"There was nothing I could copy there.{hidden}", ephemeral=True)
+            return
+        if p is None:
+            title = next((t["text"]["heading"] for t in plans if t["text"] and t["text"]["heading"]), None) \
+                or "Imported page"
             key, n = slug(title), 2
             while await self.bot.db.page_by_key(guild.id, key):
                 key, n = f"{slug(title)}-{n}", n + 1
             p = await self.bot.db.create_page(guild.id, key, title)
-        added, missed_pictures = 0, 0
-        if msg.content and msg.content.strip():
-            await self.bot.db.add_section(p.id, None, msg.content.strip()[:BODY_MAX])
-            added += 1
-        loose = [a for a in msg.attachments if (a.content_type or "").startswith("image/")]
-        for e in msg.embeds:
-            body = e.description or ""
-            for f in e.fields:
-                body += f"\n\n**{f.name}**\n{f.value}"
-            picture = None
-            url = (e.image.url if e.image else None) or (e.thumbnail.url if e.thumbnail else None)
-            if url:
-                try:
-                    picture = await images.download(url, self.data_dir)
-                except Exception as err:  # a dead or odd link shouldn't stop the text coming across
-                    log.info("Couldn't copy an embed picture: %s", err)
-                    missed_pictures += 1
-            if not (e.title or body.strip() or picture):
+        added, missed = 0, []
+        for plan in plans:
+            banner, text = plan["banner"], plan["text"]
+            picture, style = None, "inside"
+            if banner is not None:
+                picture = await self.copy_picture(banner)
+                style = "banner"
+                if picture is None:
+                    missed.append(f"the picture above section {added + 1}")
+            if text is not None and picture is None and text["urls"]:
+                picture = await self.copy_picture(text)
+                style = "inside"
+                if picture is None:
+                    missed.append(f"the picture in section {added + 1}")
+            if text is None and picture is None:
                 continue
-            await self.bot.db.add_section(p.id, (e.title or None) and e.title[:HEADING_MAX],
-                                          body.strip()[:BODY_MAX] or None,
-                                          e.colour.value if e.colour else None, picture)
+            await self.bot.db.add_section(
+                p.id, (text["heading"] or None) and text["heading"][:HEADING_MAX] if text else None,
+                (text["body"] or None) and text["body"][:BODY_MAX] if text else None,
+                text["colour"] if text else None, picture, image_style=style)
             added += 1
-        for a in loose:
+        lines = [f"Copied {len(messages)} message(s) into {added} section(s) on **{p.title}** (key `{p.key}`). "
+                 "The old messages are untouched."]
+        if missed:
+            lines.append("I couldn't copy " + ", ".join(missed) + ". Save the picture and add it with "
+                         "/noticeboard section image.")
+        lines.append("Check it with /noticeboard preview.")
+        await interaction.followup.send(" ".join(lines)[:1990], ephemeral=True)
+
+    async def copy_picture(self, part: dict) -> str | None:
+        """Keep our own copy of an imported picture. Tries Discord's copy first, then the original link."""
+        attachment = part.get("attachment")
+        if attachment is not None:
             try:
-                picture = await images.save(a, self.data_dir)
-                await self.bot.db.add_section(p.id, None, None, None, picture)
-                added += 1
-            except (images.ImageError, discord.HTTPException, OSError):
-                missed_pictures += 1
-        if not added:
-            hidden = "" if msg.author.id == guild.me.id else " If another bot posted it, Discord may be hiding its text from me."
-            await interaction.followup.send(f"That message had nothing I could copy.{hidden}", ephemeral=True)
-            return
-        text = f"Copied {added} section(s) into **{p.title}** (key `{p.key}`). The old message is untouched."
-        if missed_pictures:
-            text += f" {missed_pictures} picture(s) couldn't be copied; add them with /noticeboard section image."
-        await interaction.followup.send(text + " Check it with /noticeboard preview.", ephemeral=True)
+                return await images.save(attachment, self.data_dir)
+            except (images.ImageError, discord.HTTPException, OSError) as e:
+                log.warning("Couldn't copy an attached picture: %s", e)
+                return None
+        for url in part.get("urls", []):
+            try:
+                data = await self.bot.http.get_from_cdn(url)
+                return images.save_bytes(data, None, self.data_dir)
+            except Exception as e:
+                log.warning("Couldn't fetch a picture through Discord (%s): %s", url.split("?")[0][:120], e)
+            try:
+                return await images.download(url, self.data_dir)
+            except Exception as e:
+                log.warning("Couldn't download a picture (%s): %s", url.split("?")[0][:120], e)
+        return None
 
     @app_commands.command(name="starter", description="Make a draft Pirate's Guide to edit")
     async def starter(self, interaction: discord.Interaction) -> None:
@@ -375,7 +423,14 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
         if page.kind == "game_index":
             return [await self.game_index_message(guild)]
         out = []
-        for chunk in group(page.sections):
+        for kind, chunk in layout(page.sections):
+            if kind == "banner":
+                s = chunk[0]
+                path = images.path_of(s.image, self.data_dir)
+                if path is not None:
+                    out.append({"embeds": [], "files": [discord.File(path, filename=image_filename(s.id, s.image))],
+                                "view": None})
+                continue
             embeds, files = self.render_group(chunk)
             out.append({"embeds": embeds, "files": files, "view": None})
         return out

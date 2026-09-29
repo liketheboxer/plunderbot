@@ -68,7 +68,8 @@ def save_bytes(data: bytes, content_type: str | None, data_dir: Path) -> str:
 async def download(url: str, data_dir: Path) -> str:
     """Fetch a picture from a link (e.g. an embed's image) and keep a copy."""
     import aiohttp
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; PlunderBot; +https://discord.com)"}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20), headers=headers) as session:
         async with session.get(url) as resp:
             if resp.status != 200:
                 raise ImageError(f"download failed ({resp.status})")

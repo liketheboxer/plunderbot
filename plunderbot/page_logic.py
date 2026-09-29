@@ -49,6 +49,30 @@ def group(sections: list) -> list[list]:
     return out if out[0] else []
 
 
+def layout(sections: list) -> list[tuple[str, list]]:
+    """The page as a run of messages: ("banner", [section]) is a picture on its own, shown above that
+    section's text; ("embeds", [sections...]) is a message of up to 10 sections."""
+    out: list[tuple[str, list]] = []
+    run: list = []
+
+    def flush():
+        nonlocal run
+        for chunk in group(run):
+            out.append(("embeds", chunk))
+        run = []
+
+    for s in sections:
+        if s.image and s.image_style == "banner":
+            flush()
+            out.append(("banner", [s]))
+            if s.heading or s.body:
+                run.append(s)
+        else:
+            run.append(s)
+    flush()
+    return out
+
+
 def image_filename(section_id: int, stored: str) -> str:
     return f"s{section_id}.{stored.rsplit('.', 1)[-1]}"
 
@@ -57,9 +81,58 @@ def render_section(s, has_image: bool = False) -> discord.Embed:
     embed = discord.Embed(title=(s.heading or None) and s.heading[:HEADING_MAX],
                           description=(s.body or None) and s.body[:BODY_MAX],
                           colour=discord.Colour(s.colour if s.colour is not None else DEFAULT_COLOUR))
-    if has_image and s.image:
+    if has_image and s.image and getattr(s, "image_style", "inside") != "banner":
         embed.set_image(url=f"attachment://{image_filename(s.id, s.image)}")
     return embed
+
+
+def split_parts(messages: list) -> list[dict]:
+    """Break imported messages into parts in reading order: {"kind": "picture", "urls": [...],
+    "attachment": obj} or {"kind": "text", "heading", "body", "colour", "urls"} (urls: a picture inside
+    the text). Discord shows a message's text, then its attachments, then its embeds."""
+    parts: list[dict] = []
+    for msg in messages:
+        content = (msg.content or "").strip()
+        if content and " " not in content and content.startswith("http") and msg.embeds:
+            content = ""  # a bare picture link; its preview (an embed) carries the picture
+        if content:
+            parts.append({"kind": "text", "heading": None, "body": content, "colour": None, "urls": []})
+        for a in getattr(msg, "attachments", []):
+            if (a.content_type or "").startswith("image/"):
+                parts.append({"kind": "picture", "urls": [], "attachment": a})
+        for e in msg.embeds:
+            body = e.description or ""
+            for f in e.fields:
+                body += f"\n\n**{f.name}**\n{f.value}"
+            urls = []
+            for media in (e.image, e.thumbnail):
+                if media and media.url:
+                    urls += [u for u in (getattr(media, "proxy_url", None), media.url) if u]
+            if not (e.title or body.strip()):
+                if urls:
+                    parts.append({"kind": "picture", "urls": urls, "attachment": None})
+                continue
+            parts.append({"kind": "text", "heading": e.title, "body": body.strip(),
+                          "colour": e.colour.value if e.colour else None, "urls": urls})
+    return parts
+
+
+def plan_sections(parts: list[dict]) -> list[dict]:
+    """Pair each picture that stands on its own with the text right after it (a banner above that
+    section); a picture with no text after it becomes a picture-only section."""
+    out: list[dict] = []
+    pending = None
+    for part in parts:
+        if part["kind"] == "picture":
+            if pending is not None:
+                out.append({"banner": pending, "text": None})
+            pending = part
+        else:
+            out.append({"banner": pending, "text": part})
+            pending = None
+    if pending is not None:
+        out.append({"banner": pending, "text": None})
+    return out
 
 
 def game_index_lines(entries: list[dict]) -> list[str]:
