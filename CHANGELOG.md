@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3 (2026-09-29): More region zones
+
+- Region roles for every North American and Australian zone are recognised by `/admin regions auto`: Hawaii, Alaska, Pacific, Arizona, Mountain, Central, Eastern, Atlantic and Newfoundland; Western, Northern Territory, South Australia, Queensland and Eastern Australia. Arizona, Queensland and the Northern Territory keep their no-daylight-saving time.
+
 ## 0.3.2 (2026-09-29): Region roles set time zones
 
 - Region roles now stand for time zones: picking "North America - East" (from the existing reaction menu, or PlunderBot's own menus and onboarding in phase 4) saves Eastern time for that member.

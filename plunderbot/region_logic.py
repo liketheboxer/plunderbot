@@ -40,6 +40,12 @@ def guess_zone(role_name: str) -> Guess | None:
         return Guess(None, "spans several zones")
     if _has(w, "mountain") and _has(w, "central"):
         return Guess("America/Chicago", "covers Mountain and Central; Mountain members are an hour off")
+    if _has(w, "arizona"):
+        return Guess("America/Phoenix")  # no daylight saving
+    if _has(w, "newfoundland"):
+        return Guess("America/St_Johns")
+    if _has(w, "atlantic", "ast", "adt"):
+        return Guess("America/Halifax")
     if _has(w, "mountain", "mst", "mdt"):
         return Guess("America/Denver")
     if _has(w, "central", "cst", "cdt") and north_america or _has(w, "cst", "cdt"):
@@ -63,9 +69,15 @@ def guess_zone(role_name: str) -> Guess | None:
     if _has(w, "australia", "aus"):
         if _has(w, "west", "western", "perth"):
             return Guess("Australia/Perth")
-        if _has(w, "central", "adelaide"):
+        if _has(w, "northern territory", "nt", "darwin"):
+            return Guess("Australia/Darwin")  # no daylight saving
+        if _has(w, "central", "south australia", "adelaide"):
             return Guess("Australia/Adelaide")
-        return Guess("Australia/Sydney", "east coast; Perth and Adelaide members differ")
+        if _has(w, "queensland", "qld", "brisbane"):
+            return Guess("Australia/Brisbane")  # no daylight saving
+        if _has(w, "east", "eastern", "sydney", "melbourne"):
+            return Guess("Australia/Sydney")
+        return Guess("Australia/Sydney", "east coast; Perth, Darwin, Adelaide and Brisbane members differ")
     if _has(w, "asia", "apac"):
         return Guess(None, "spans several zones")
     return None

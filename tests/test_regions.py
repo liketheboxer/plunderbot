@@ -137,3 +137,27 @@ async def test_existing_zones_count_as_manual(tmp_path):
     await d.set_region_zone(5, 101, None)
     assert await d.region_zones(5) == {}
     await d.close()
+
+
+RECOMMENDED = {
+    "North America - Hawaii": "Pacific/Honolulu",
+    "North America - Alaska": "America/Anchorage",
+    "North America - Pacific": "America/Los_Angeles",
+    "North America - Arizona": "America/Phoenix",
+    "North America - Mountain": "America/Denver",
+    "North America - Central": "America/Chicago",
+    "North America - Eastern": "America/New_York",
+    "North America - Atlantic": "America/Halifax",
+    "North America - Newfoundland": "America/St_Johns",
+    "Australia - Western": "Australia/Perth",
+    "Australia - Northern Territory": "Australia/Darwin",
+    "Australia - South Australia": "Australia/Adelaide",
+    "Australia - Queensland": "Australia/Brisbane",
+    "Australia - Eastern": "Australia/Sydney",
+}
+
+
+@pytest.mark.parametrize("name,zone", RECOMMENDED.items())
+def test_recommended_role_names(name, zone):
+    g = guess_zone(name)
+    assert g.zone == zone and not g.note
