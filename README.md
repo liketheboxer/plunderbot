@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 0.9.0 covers **phases 1 to 8 of 9**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, and Articles. The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.0.0 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho). The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -74,6 +74,14 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - Limits: a monthly dollar budget (default $5) and replies per member per day (default 20); with Kagi, also web searches per day (default 25, about 1.5¢ each, billed by Kagi). When a limit is hit, it says so in character.
 - It only answers in channels everyone can see, so staff channels are left out, and not to newcomers still on the gangplank. Quartermasters can switch it off per channel.
 - Set a spend limit in the Anthropic Console as well, as a backstop.
+
+### How the Daisho screens work
+
+- PlunderBot's module in The Magical Samurai (Daisho, `daisho.magicalsamurai.com`) has screens for its settings, articles, Notice Board pages, voyages, crews and the Ship's Ledger, for crew with access to the PlunderBot unit there. Its manual is in Daisho under **Manual › PlunderBot**.
+- PlunderBot keeps its own data and sends Daisho a copy: what changed every five minutes, everything every half hour. Changes made on the screens are picked up within about 15 seconds, applied with the same checks as the slash commands, and reported back (done, or refused and why).
+- To connect it: on the unit's page in Daisho, the Captain picks **PlunderBot** as its module and issues a module token with all three scopes, then refits. Exocomp hands over `SAMURAI_URL`, `SAMURAI_PUBLIC_URL` and `SAMURAI_MODULE_TOKEN`.
+- Once connected, voyage and crew cards get a **Manage** button that opens them in Daisho.
+- If Daisho is down, PlunderBot carries on and catches up when it's back.
 
 ### How Articles work
 
@@ -223,9 +231,10 @@ With `DEV_GUILD_ID` set, commands sync to that one server instantly instead of g
 | `plunderbot/birthday_logic.py` | Date rules: leap days, next birthday, when to toast, change limits |
 | `plunderbot/games.py` | The game profiles |
 | `plunderbot/crew_logic.py` | Crew Call rules and the crew card |
+| `plunderbot/links.py` | Manage links into Daisho |
 | `plunderbot/articles_logic.py` | Articles: matching words, schedules, reply templates, which actions fit which trigger |
 | `plunderbot/ledger_logic.py` | The Ship's Ledger: reading a Captain's Log, profiles and hauls |
-| `plunderbot/cogs/` | Features: `core`, `admin`, `birthdays`, `crew`, `voyages`, `regions`, `gangplank`, `colours`, `noticeboard`, `shipslog`, `crowsnest`, `parley`, `ledger`, `articles` |
+| `plunderbot/cogs/` | Features: `core`, `admin`, `birthdays`, `crew`, `voyages`, `regions`, `gangplank`, `colours`, `noticeboard`, `shipslog`, `crowsnest`, `parley`, `ledger`, `articles`, `daisho` |
 | `exocomp_telemetry.py` | Exocomp's telemetry helper, vendored |
 
 ## Rules of the ship

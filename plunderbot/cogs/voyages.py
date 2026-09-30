@@ -14,7 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import crew_emoji, games, images, voice
+from .. import links, crew_emoji, games, images, voice
 from ..birthday_logic import zone
 from ..crew_logic import iso, now_utc
 from ..db import Voyage
@@ -65,6 +65,8 @@ def voyage_view(v: Voyage) -> discord.ui.View:
     closed = v.status != "scheduled"
     for action in BUTTONS:
         view.add_item(VoyageButton(action, v.id, disabled=closed))
+    if not closed:  # a link to the voyage in Daisho, once PlunderBot's module is connected
+        links.add_manage_button(view, "voyages", v.id)
     return view
 
 
@@ -417,18 +419,10 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 log.warning("Voyage picture refused: %r", e)
                 await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
                 return
-        async with self.lock:
-            current = await self.bot.db.get_voyage(v.id)
-            if current is None or current.status != "scheduled":  # it started meanwhile
-                await interaction.followup.send(voice.say("voyage_over"), ephemeral=True)
-                return
-            if "starts_at" in changes or "reminders" in changes:
-                await self._reset_reminder_baseline(v.id)
-            v = await self.bot.db.update_voyage(v.id, **changes)
-            promoted = await self._promote_waitlist(v)
-        await self.refresh(interaction.guild, v, new_image="image" in changes)
-        await self.sync_event(interaction.guild, v)
-        await self._announce_promotions(interaction.guild, v, promoted)
+        v = await self.apply_edit(interaction.guild, v.id, changes)
+        if v is None:  # it started meanwhile
+            await interaction.followup.send(voice.say("voyage_over"), ephemeral=True)
+            return
         stamp = int(datetime.fromisoformat(v.starts_at).timestamp())
         text = voice.say("voyage_edited", link=_link(v), when=f"<t:{stamp}:F>")
         if starts is not None:
@@ -448,17 +442,40 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         if v is None:
             return
         await interaction.response.defer(ephemeral=True)
+        if not await self.apply_cancel(interaction.guild, v.id, whole_series):  # it started meanwhile
+            await interaction.followup.send(voice.say("voyage_over"), ephemeral=True)
+            return
+        await interaction.followup.send(voice.say("voyage_cancel_done"), ephemeral=True)
+
+    async def apply_edit(self, guild, voyage_id: int, changes: dict) -> Voyage | None:
+        """Save changes to a scheduled voyage and update its card, event and waitlist. None if it's no
+        longer scheduled. Used by /voyage edit and by the Daisho screens."""
         async with self.lock:
-            current = await self.bot.db.get_voyage(v.id)
-            if current is None or current.status != "scheduled":  # it started meanwhile
-                await interaction.followup.send(voice.say("voyage_over"), ephemeral=True)
-                return
-            v = await self.bot.db.update_voyage(v.id, status="cancelled")
-        await self.refresh(interaction.guild, v)
-        await self.sync_event(interaction.guild, v, "cancel")
+            current = await self.bot.db.get_voyage(voyage_id)
+            if current is None or current.status != "scheduled":
+                return None
+            if "starts_at" in changes or "reminders" in changes:
+                await self._reset_reminder_baseline(voyage_id)
+            v = await self.bot.db.update_voyage(voyage_id, **changes)
+            promoted = await self._promote_waitlist(v)
+        await self.refresh(guild, v, new_image="image" in changes)
+        await self.sync_event(guild, v)
+        await self._announce_promotions(guild, v, promoted)
+        return v
+
+    async def apply_cancel(self, guild, voyage_id: int, whole_series: bool = False) -> bool:
+        """Cancel a scheduled voyage, tell the people who'd signed up, and schedule the next one of a
+        series unless the whole series is cancelled. False if it's no longer scheduled."""
+        async with self.lock:
+            current = await self.bot.db.get_voyage(voyage_id)
+            if current is None or current.status != "scheduled":
+                return False
+            v = await self.bot.db.update_voyage(voyage_id, status="cancelled")
+        await self.refresh(guild, v)
+        await self.sync_event(guild, v, "cancel")
         rsvps = await self.bot.db.rsvps(v.id)
         people = rsvps.aboard + rsvps.maybe + rsvps.waitlist
-        channel = interaction.guild.get_channel(v.channel_id)
+        channel = guild.get_channel(v.channel_id)
         if channel is not None and people:
             line = voice.say("voyage_cancelled", title=v.title, names="{names}")
             try:
@@ -466,8 +483,8 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             except discord.HTTPException as e:
                 log.warning("Couldn't announce the cancellation of voyage %s: %s", v.id, e)
         if v.repeat != "none" and not whole_series:
-            await self.schedule_next(interaction.guild, v)
-        await interaction.followup.send(voice.say("voyage_cancel_done"), ephemeral=True)
+            await self.schedule_next(guild, v)
+        return True
 
     edit.autocomplete("voyage")(_manageable)
     cancel.autocomplete("voyage")(_manageable)

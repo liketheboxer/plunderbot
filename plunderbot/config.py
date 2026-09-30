@@ -21,6 +21,12 @@ class Config:
     anthropic_api_key: str | None = None
     kagi_api_key: str | None = None
     parley_model: str = "claude-haiku-4-5"
+    # The Magical Samurai's PlunderBot module (Daisho). Exocomp sets all of these at each refit once the
+    # Captain has issued the module token; without the token the bot simply doesn't sync.
+    samurai_url: str | None = None          # where the API is (SAMURAI_URL)
+    samurai_public_url: str | None = None   # where people open the screens (SAMURAI_PUBLIC_URL)
+    module_token: str | None = None         # SAMURAI_MODULE_TOKEN
+    unit: str = "plunderbot"                # EXOCOMP_UNIT: the unit's short name, in the screens' address
 
     @property
     def db_path(self) -> Path:
@@ -64,4 +70,9 @@ def load() -> Config:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() or None,
         kagi_api_key=os.environ.get("KAGI_API_KEY", "").strip() or None,
         parley_model=os.environ.get("PARLEY_MODEL", "").strip() or "claude-haiku-4-5",
+        samurai_url=(os.environ.get("SAMURAI_URL", "").strip().rstrip("/") or None),
+        samurai_public_url=(os.environ.get("SAMURAI_PUBLIC_URL", "").strip().rstrip("/")
+                            or os.environ.get("SAMURAI_URL", "").strip().rstrip("/") or None),
+        module_token=os.environ.get("SAMURAI_MODULE_TOKEN", "").strip() or None,
+        unit=os.environ.get("EXOCOMP_UNIT", "").strip() or "plunderbot",
     )

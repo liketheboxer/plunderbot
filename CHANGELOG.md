@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0 (2026-09-29): Daisho
+
+Phase 9, the last of the plan. Needs The Magical Samurai 1.11.0.
+
+- PlunderBot has management screens in The Magical Samurai (Daisho): Settings, Articles, the Notice Board, Voyages, Crews and the Ship's Ledger.
+- PlunderBot stays the source of truth. It sends Daisho its data (what changed every five minutes, everything every half hour), picks up changes made there every 15 seconds, applies them with the same checks as its slash commands, and reports back how each went. If Daisho is down, PlunderBot carries on and catches up later.
+- Voyage and crew cards get a **Manage** link button that opens them in Daisho (only once the module is connected).
+- `/voyage edit` and `/voyage cancel` now share their work with Daisho's edits (no change in how they behave).
+- New settings, all set by Exocomp at each refit once the Captain has issued the module token: `SAMURAI_URL`, `SAMURAI_PUBLIC_URL`, `SAMURAI_MODULE_TOKEN`. Without them nothing changes.
+
 ## 0.9.1 (2026-09-29): Server emoji in articles
 
 - Type a server emoji's name, like `:Bruh:`, in an article's replies (the pop-up form has no emoji picker) or in `/articles react`, and PlunderBot uses the real emoji. A reply can be just the emoji.

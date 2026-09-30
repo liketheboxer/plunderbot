@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import images, crew_emoji, games, voice
+from .. import images, crew_emoji, games, links, voice
 from ..ledger_logic import haul_line, ship_label
 from ..crew_logic import (PING_COOLDOWN, clean_title, expired, iso, now_utc, render_card, voice_channel_name,
                           voice_cleanup_due)
@@ -59,6 +59,8 @@ def card_view(crew: Crew) -> discord.ui.View:
     if not (profile and profile.open_ended):  # a hangout is already in voice; no Set Sail
         view.add_item(CrewButton("sail", crew.id, disabled=over or crew.status == "sailing"))
     view.add_item(CrewButton("close", crew.id, disabled=over))
+    if not over:  # a link to the crew in Daisho, once PlunderBot's module is connected
+        links.add_manage_button(view, "crews", crew.id)
     return view
 
 

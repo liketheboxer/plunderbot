@@ -28,6 +28,7 @@ COGS = [
     "plunderbot.cogs.parley",
     "plunderbot.cogs.ledger",
     "plunderbot.cogs.articles",
+    "plunderbot.cogs.daisho",
 ]
 
 
