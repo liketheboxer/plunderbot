@@ -236,6 +236,9 @@ class Parley(commands.Cog):
             return "\n\n".join(out)[:6000]
         if name == "game_activity":
             return await self.game_activity(guild, now)
+        if name == "ship_ledger":
+            ledger = self.bot.get_cog("ShipLedger")
+            return await ledger.summary(guild.id) if ledger else "The Ship's Ledger isn't running."
         if name == "plunderbot_commands":
             return COMMANDS_HELP
         if name == "search_web":

@@ -62,6 +62,10 @@ TOOLS = [
                     "pirates sailed in the last 30 days, how many members follow it, and voyages planned in the "
                     "next 14 days. Use for 'what's popular', 'what do people play', 'is anyone playing X'.",
      "input_schema": {"type": "object", "properties": {}}},
+    {"name": "ship_ledger",
+     "description": "The Ship's Ledger: Sea of Thieves plunder logged from Captain's Log screenshots. All-time totals "
+                    "and the richest ships and pirates.",
+     "input_schema": {"type": "object", "properties": {}}},
     {"name": "plunderbot_commands",
      "description": "PlunderBot's slash commands and what each does.",
      "input_schema": {"type": "object", "properties": {}}},
@@ -79,6 +83,9 @@ Voyages (scheduled sessions): /voyage create, /voyage edit, /voyage cancel, /voy
 Time zones: /timezone set, /timezone show, /timezone clear. Picking a region role also sets it.
 Birthdays: /birthday set, /birthday mine, /birthday remove, /birthday upcoming.
 Following games (ping role + forum thread): /follow, or the Follow games button on the Game Index.
+Ships (Sea of Thieves): /ship register, /ship edit, /ship retire, /ship show (a ship's profile), /ship fleet (richest ships and pirates). Pick your ship in /crew start.
+Logging a voyage's plunder: /ship log with a screenshot of the Captain's Log two-page spread (PlunderBot reads it; Confirm or Edit before it's saved).
+Pirate profiles: /pirate profile, /pirate set (gamertag and motto).
 About PlunderBot: /plunderbot.
 Quartermasters manage settings with /admin, /colours (role menus) and /noticeboard (pages)."""
 
@@ -99,7 +106,7 @@ Personality: bright, bubbly and always upbeat, a helpful butler with a pirate st
 
 How you answer:
 - Keep it short: usually 1 to 4 sentences, never more than about 150 words. Discord markdown is fine; no headings.
-- For anything about this server (voyages, crews, birthdays, games, rules, how things work, your own commands) use your tools; never guess server facts.
+- For anything about this server (voyages, crews, birthdays, games, ships and plunder, rules, how things work, your own commands) use your tools; never guess server facts.
 - For current facts about games or the wider world, use search_web if you have it and you're not sure, and mention where it came from briefly.
 - You can't run commands or change anything yourself. Point people to the right slash command instead, always written in full as your plunderbot_commands tool gives it (for example `/crew start`, never just `/crew`).
 - If you don't know, say so cheerfully. Don't make things up.

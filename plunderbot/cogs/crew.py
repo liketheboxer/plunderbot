@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from .. import images, crew_emoji, games, voice
+from ..ledger_logic import haul_line, ship_label
 from ..crew_logic import (PING_COOLDOWN, clean_title, expired, iso, now_utc, render_card, voice_channel_name,
                           voice_cleanup_due)
 from ..db import Crew
@@ -89,14 +90,21 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
                            activity="What you're planning (depends on the game)", note="Anything else crewmates should know",
                            name="Name the session (also names the voice channel)",
                            image="A picture for the crew card",
-                           notify="Tag the game's ping role (default: yes)")
+                           notify="Tag the game's ping role (default: yes)",
+                           ship="Sea of Thieves: which registered ship you're sailing (default: yours, if you have one)")
     @app_commands.choices(game=GAME_CHOICES)
     async def start(self, interaction: discord.Interaction, game: app_commands.Choice[str],
                     size: str | None = None, activity: str | None = None,
                     note: app_commands.Range[str, 1, 200] | None = None,
                     name: app_commands.Range[str, 1, 60] | None = None,
-                    image: discord.Attachment | None = None, notify: bool = True) -> None:
+                    image: discord.Attachment | None = None, notify: bool = True,
+                    ship: str | None = None) -> None:
         profile = games.get(game.value)
+        sailing_ship = await self.pick_ship(interaction, profile, ship)
+        if sailing_ship is False:
+            return
+        if sailing_ship is not None and not size:
+            size = sailing_ship.kind  # a galleon musters a galleon's crew
         crew_size = profile.size(size)
         if crew_size is None:
             await interaction.response.send_message(voice.say(
@@ -137,6 +145,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
                 game_key=profile.key, size_label=crew_size.label, capacity=crew_size.capacity,
                 activity=tag, note=note, created_at=iso(now), title=clean_title(name),
                 expires_at=iso(now + timedelta(minutes=settings.crew_expire_minutes)), image=image_name)
+            if sailing_ship is not None:
+                crew = await self.bot.db.update_crew(crew.id, ship_id=sailing_ship.id)
         await self._say(interaction, voice.say("hangout_started" if profile.open_ended else "crew_started"))
 
         key = "hangout_call" if profile.open_ended else "crew_call"
@@ -151,7 +161,7 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role])
         try:
             _, card_emoji = await self.emoji_for(interaction.guild_id, profile, crew.size_label)
-            message = await channel.send(text, embed=self.card_embed(crew, profile, card_emoji), view=card_view(crew),
+            message = await channel.send(text, embed=await self.card_embed(crew, profile, card_emoji), view=card_view(crew),
                                          allowed_mentions=mentions, **self.card_file(channel, crew.image))
         except discord.HTTPException as e:
             log.warning("Couldn't post the card for crew %s: %s", crew.id, e)
@@ -167,6 +177,23 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
         if profile.open_ended or crew.full:  # a hangout opens its voice channel straight away
             await self.sail(interaction.guild, crew.id)
 
+    async def pick_ship(self, interaction: discord.Interaction, profile, value: str | None):
+        """The registered ship a Sea of Thieves crew sails: the one picked, or the captain's only ship.
+        None for no ship; False after telling the captain the pick wasn't a ship."""
+        if profile is None or profile.key != "sot":
+            return None
+        ledger = self.bot.get_cog("ShipLedger")
+        if ledger is None:
+            return None
+        if value:
+            found = await ledger.find_ship(interaction.guild_id, value)
+            if found is None or found.retired:
+                await interaction.response.send_message(voice.say("ship_unknown"), ephemeral=True)
+                return False
+            return found
+        mine = await self.bot.db.ships(interaction.guild_id, interaction.user.id)
+        return mine[0] if len(mine) == 1 else None
+
     @staticmethod
     async def _say(interaction: discord.Interaction, text: str) -> None:
         if interaction.response.is_done():
@@ -174,8 +201,12 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
         else:
             await interaction.response.send_message(text, ephemeral=True)
 
-    def card_embed(self, crew: Crew, profile, card_emoji: str) -> discord.Embed:
-        return images.show(render_card(crew, profile, card_emoji), crew.image, self.bot.config.data_dir)
+    async def card_embed(self, crew: Crew, profile, card_emoji: str) -> discord.Embed:
+        ship = await self.bot.db.get_ship(crew.ship_id)
+        entry = None if crew.active else await self.bot.db.confirmed_log_for_crew(crew.id)
+        embed = render_card(crew, profile, card_emoji, ship=ship_label(ship) if ship else None,
+                            haul=haul_line(entry.gold, entry.doubloons) if entry else None)
+        return images.show(embed, crew.image, self.bot.config.data_dir)
 
     def card_file(self, channel, image_name: str | None) -> dict:
         """send() keyword for a card's picture, if there is one and PlunderBot may attach files there."""
@@ -212,7 +243,7 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             crew = await self.bot.db.get_crew(crew.id)
         try:
             _, card_emoji = await self.emoji_for(guild.id, profile, crew.size_label)
-            message = await channel.send(embed=self.card_embed(crew, profile, card_emoji), view=card_view(crew),
+            message = await channel.send(embed=await self.card_embed(crew, profile, card_emoji), view=card_view(crew),
                                          allowed_mentions=discord.AllowedMentions.none(),
                                          **self.card_file(channel, crew.image))
             await self.bot.db.update_crew(crew.id, message_id=message.id)
@@ -226,6 +257,13 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
         profile = games.get(getattr(interaction.namespace, "game", None))
         options = [s for s in (profile.sizes if profile else ()) if current.lower() in s.label.lower()]
         return [app_commands.Choice(name=f"{s.label} ({s.capacity})", value=s.label) for s in options][:25]
+
+    @start.autocomplete("ship")
+    async def ship_autocomplete(self, interaction: discord.Interaction, current: str):
+        ledger = self.bot.get_cog("ShipLedger")
+        if ledger is None:
+            return []
+        return await ledger.ship_choices(interaction.guild_id, interaction.user.id, current, own_only=False)
 
     @start.autocomplete("activity")
     async def activity_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -394,6 +432,17 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
                 await send_pinging(card_channel, lambda names: line.replace("{names}", names), crew.members)
             except discord.HTTPException as e:
                 log.warning("Couldn't announce sailing for crew %s: %s", crew.id, e)
+        await self._tell_ledger("on_crew_sailed", guild, crew)
+
+    async def _tell_ledger(self, hook: str, guild, crew: Crew) -> None:
+        """The Ship's Ledger asks Sea of Thieves crews for their Captain's Log."""
+        ledger = self.bot.get_cog("ShipLedger")
+        if ledger is None or guild is None:
+            return
+        try:
+            await getattr(ledger, hook)(guild, crew)
+        except Exception:
+            log.exception("Ship's Ledger %s failed for crew %s", hook, crew.id)
 
     async def end(self, guild: discord.Guild, crew_id: int, status: str) -> None:
         async with self.lock:
@@ -423,6 +472,7 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
                 except discord.HTTPException as e:
                     log.warning("Couldn't delete voice channel %s: %s", vc.id, e)
         await self.refresh_card(guild, crew)
+        await self._tell_ledger("on_crew_ended", guild, crew)
 
     async def refresh_card(self, guild: discord.Guild | None, crew: Crew) -> None:
         if guild is None or not crew.message_id:
@@ -433,7 +483,7 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             return
         try:
             _, card_emoji = await self.emoji_for(guild.id, profile, crew.size_label)
-            await channel.get_partial_message(crew.message_id).edit(embed=self.card_embed(crew, profile, card_emoji),
+            await channel.get_partial_message(crew.message_id).edit(embed=await self.card_embed(crew, profile, card_emoji),
                                                                     view=card_view(crew))
         except discord.NotFound:
             pass  # someone deleted the card; the crew still runs its course

@@ -13,6 +13,7 @@ from discord.ext import commands, tasks
 from .. import voice
 from ..birthday_logic import upcoming, zone
 from ..crew_logic import iso
+from ..ledger_logic import ship_label, week_lines
 from ..shipslog_logic import WeekStats, is_due, render
 
 log = logging.getLogger("plunderbot.shipslog")
@@ -96,6 +97,10 @@ class ShipsLog(commands.Cog):
             guild.id, start.date().isoformat(), now.date().isoformat())).items()
             if guild.get_channel_or_thread(tid) is not None}
         stats.news = await self.bot.db.news_posted_between(guild.id, iso(start), iso(now))
+        logs = await self.bot.db.logs_between(guild.id, iso(start), iso(now))
+        if logs:
+            names = {sh.id: ship_label(sh) for sh in await self.bot.db.ships(guild.id, include_retired=True)}
+            stats.plunder = week_lines(logs, names)
         return stats
 
     async def build(self, guild: discord.Guild, now: datetime | None = None) -> discord.Embed:

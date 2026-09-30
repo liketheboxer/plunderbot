@@ -1,4 +1,4 @@
-"""Thin clients for the two outside services Parley uses: Claude (Anthropic) and Kagi FastGPT.
+"""Thin clients for the outside services: Claude (Anthropic) for Parley and the Ship's Ledger, and Kagi FastGPT.
 
 Plain aiohttp, no SDKs, so there's nothing extra to install. Keys come from Exocomp secrets.
 """
@@ -38,11 +38,13 @@ class Claude(_Client):
         self.api_key, self.model = api_key, model
 
     async def create(self, *, system: str, messages: list[dict], tools: list[dict] | None = None,
-                     max_tokens: int = 600, allow_tools: bool = True) -> dict:
+                     max_tokens: int = 600, allow_tools: bool = True, tool_choice: dict | None = None) -> dict:
         body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": messages}
         if tools:
             body["tools"] = tools
-            if not allow_tools:  # tools stay declared (earlier turns used them) but it must answer now
+            if tool_choice is not None:  # e.g. {"type": "tool", "name": ...} to always fill in a form
+                body["tool_choice"] = tool_choice
+            elif not allow_tools:  # tools stay declared (earlier turns used them) but it must answer now
                 body["tool_choice"] = {"type": "none"}
         headers = {"x-api-key": self.api_key, "anthropic-version": ANTHROPIC_VERSION,
                    "content-type": "application/json"}

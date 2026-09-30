@@ -33,12 +33,15 @@ async def bot(tmp_path):
 
 async def test_command_tree(bot):
     top = {c.name: c for c in bot.tree.get_commands()}
-    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage", "timezone", "colours", "noticeboard", "follow"}
+    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage", "timezone", "colours", "noticeboard", "follow", "ship", "pirate"}
+    assert {c.name for c in top["ship"].commands} == {"register", "edit", "retire", "show", "fleet", "log"}
+    assert {c.name for c in top["pirate"].commands} == {"profile", "set"}
+    assert top["ship"].guild_only and top["pirate"].guild_only
     assert {c.name for c in top["voyage"].commands} == {"create", "edit", "cancel", "list"}
     admin = top["admin"]
     assert isinstance(admin, app_commands.Group)
     assert admin.guild_only and admin.default_permissions.manage_guild
-    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages", "regions", "gangplank", "shipslog", "crowsnest", "parley"}
+    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages", "regions", "gangplank", "shipslog", "crowsnest", "parley", "ledger"}
     assert {c.name for c in admin.get_command("crew").commands} == {"channel", "category", "cleanup", "expire", "pingrole", "autopings", "emoji"}
     assert {c.name for c in top["crew"].commands} == {"start", "close", "list", "rename"}
     bday_admin = admin.get_command("birthdays")

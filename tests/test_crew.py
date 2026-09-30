@@ -128,6 +128,9 @@ class FakeMessage:
     async def edit(self, **kw):
         self.edits.append(kw)
 
+    async def delete(self):
+        self.deleted = True
+
 
 class FakeTextChannel:
     def __init__(self, cid):

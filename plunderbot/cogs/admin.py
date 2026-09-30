@@ -45,6 +45,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
     shipslog = app_commands.Group(name="shipslog", description="The Ship's Log weekly roundup")
     crowsnest = app_commands.Group(name="crowsnest", description="The Crow's Nest: game news in each game's thread")
     parley = app_commands.Group(name="parley", description="Parley: PlunderBot answering in chat")
+    ledger = app_commands.Group(name="ledger", description="The Ship's Ledger: Sea of Thieves ships and plunder")
 
     def __init__(self, bot):
         self.bot = bot
@@ -789,6 +790,31 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         await interaction.response.send_message(
             f"Limits: ${s.parley_budget_cents / 100:.2f} a month, {s.parley_daily} replies per member a day, "
             f"{s.parley_kagi_daily} web searches a day.", ephemeral=True)
+
+
+    # ------------------------------------------------------------ the Ship's Ledger
+    @ledger.command(name="reminders", description="Remind Sea of Thieves crews to screenshot and log their Captain's Log")
+    @app_commands.describe(on="On: a nudge when a crew sets sail and when it's back in port")
+    async def ledger_reminders(self, interaction: discord.Interaction, on: bool) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, ledger_reminders=int(on))
+        await interaction.response.send_message(
+            "Captain's Log reminders are on: Sea of Thieves crews get a nudge when they set sail and when they're "
+            "back in port." if on else "Captain's Log reminders are off. `/ship log` still works.", ephemeral=True)
+
+    @ledger.command(name="remove", description="Take a haul out of the ledger (the number is in its footer)")
+    @app_commands.describe(entry="The ledger entry number, e.g. 12 from 'Ledger entry #12'")
+    async def ledger_remove(self, interaction: discord.Interaction, entry: int) -> None:
+        found = await self.bot.db.get_log(entry)
+        if found is None or found.guild_id != interaction.guild_id:
+            await interaction.response.send_message(f"There's no ledger entry #{entry}.", ephemeral=True)
+            return
+        await self.bot.get_cog("ShipLedger").remove(interaction.guild, found)
+        crew = await self.bot.db.get_crew(found.crew_id) if found.crew_id else None
+        crew_cog = self.bot.get_cog("CrewCall")
+        if crew is not None and crew_cog is not None:
+            await crew_cog.refresh_card(interaction.guild, crew)
+        await interaction.response.send_message(
+            f"Ledger entry #{entry} ({found.gold:,} gold) is gone, and its post with it.", ephemeral=True)
 
 
 async def setup(bot) -> None:

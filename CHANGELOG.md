@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0 (2026-09-29): The Ship's Ledger
+
+Phase 7.
+
+- Ships: `/ship register` (name, Sloop/Brigantine/Galleon, motto, picture), `edit`, `retire`, `show` (profile with plunder, best haul, trusted crew and latest voyages) and `fleet` (richest ships and pirates).
+- `/crew start` has a `ship` option for Sea of Thieves; your only ship is picked for you, and a ship sets the crew size. The crew card shows the ship, and the haul once it's logged.
+- Captain's Log reminders: when a Sea of Thieves crew sets sail, the ship's owner (or the captain) is reminded to screenshot the Captain's Log before logging off; back in port, they're asked to post it. `/admin ledger reminders` turns them off.
+- `/ship log`: Claude Haiku reads the screenshot (gold, doubloons, emissary, reputation, voyage stats) and shows it privately with Confirm, Edit and Cancel. A confirmed haul replies to the crew card and counts in full for the ship and everyone aboard. One haul per crew; the captain, ship owner or logger can replace it. Works without a screenshot (type it in). Readings count toward Parley's monthly budget. `/admin ledger remove` takes one out.
+- `/pirate profile` and `/pirate set` (gamertag and motto): crews sailed, favourite games, ships and plunder.
+- The weekly Ship's Log adds the week's plunder; Parley has a `ship_ledger` tool.
+- New dependency: Pillow, to shrink big screenshots before they're read. Database migration 16.
+
 ## 0.7.2 (2026-09-29): Parley knows what's popular
 
 - New Parley tool, game activity: for each game, crews that set sail and different pirates who sailed in the last 30 days, members following it, and voyages planned in the next 14 days. Ask "what do people play here?"

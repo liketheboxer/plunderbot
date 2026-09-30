@@ -32,11 +32,12 @@ class WeekStats:
     newcomers: list = field(default_factory=list)        # user ids who joined and are aboard
     threads: dict = field(default_factory=dict)          # thread id -> messages
     news: list = field(default_factory=list)             # (game_key, title, url)
+    plunder: list = field(default_factory=list)          # lines about the week's logged Sea of Thieves hauls
 
     @property
     def quiet(self) -> bool:
         return not (self.crews or self.voyages_done or self.voyages_ahead or self.birthdays or self.newcomers
-                    or self.threads or self.news)
+                    or self.threads or self.news or self.plunder)
 
 
 def _fit(lines: list[str], limit: int = FIELD_MAX) -> str:
@@ -83,6 +84,8 @@ def render(stats: WeekStats, intro: str, colour: int = 0x1F8B8B) -> discord.Embe
     lines = crew_lines(stats.crews)
     if lines:
         embed.add_field(name="⚓ On the water", value=_fit(lines), inline=False)
+    if stats.plunder:
+        embed.add_field(name="💰 Plunder", value=_fit(stats.plunder), inline=False)
     if stats.voyages_done:
         embed.add_field(name="🗺️ Voyages sailed", value=_fit([voyage_line(v) for v in stats.voyages_done]),
                         inline=False)

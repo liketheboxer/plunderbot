@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 0.3.0 covers **phases 1 to 3 of 9**: the foundation, Birthdays, Crew Call and Voyages. The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 0.8.0 covers **phases 1 to 7 of 9**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, and the Ship's Ledger. The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -18,6 +18,11 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/crew rename` | Captain | Rename your session and its voice channel ("⛵ | Fort Night"); leave empty for the default |
 | `/crew close` | Captain | Close your crew call and its voice channel |
 | `/crew list` | Everyone | Crews mustering or sailing right now |
+| `/ship register` | Everyone | Add your Sea of Thieves ship: name, Sloop/Brigantine/Galleon, optional motto and picture. Also `edit`, `retire` (her ledger stays) |
+| `/ship log` | Everyone | Log a voyage from a Captain's Log screenshot (the two-page spread with your Gold). PlunderBot reads it and shows you privately; Confirm, Edit or Cancel. Leave the screenshot out to type it in |
+| `/ship show` | Everyone | A ship's profile: captain, plunder, best haul, trusted crew, latest voyages |
+| `/ship fleet` | Everyone | The richest ships and pirates |
+| `/pirate profile` | Everyone | A pirate's profile: crews sailed, favourite games, ships, plunder. `/pirate set` for your gamertag and motto |
 | `/voyage create` | Everyone | Schedule a voyage: title, date (friday, tomorrow, 10/3), time (8pm), optional game and size, seats, details, reminders (default 1 day and 1 hour before; e.g. `2d, 3h, 15m` or `none`), repeat (weekly, every 2 weeks, monthly), length, a picture, and when to tag the game's ping role (when posted by default; or also at each reminder and when it sails; or never) |
 | `/voyage edit` | Organizer or mod | Change the title, date, time, details, reminders, seats, picture (or remove it) or when the game's role is tagged |
 | `/voyage cancel` | Organizer or mod | Cancel one voyage, or with `whole_series:True` a repeating series |
@@ -31,6 +36,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin shipslog channel` | Manage Server | The weekly Ship's Log roundup: `channel` (empty turns it off), `when` (day and hour), `preview`, `post` |
 | `/admin crowsnest on` | Manage Server | Game news in each game's forum thread: `on`, `off`, `check`, `source` (Steam app, RSS/Atom feed, none or default), `preview` |
 | `/admin parley on` | Manage Server | Parley (PlunderBot answering in chat): `on`, `off`, `status` (spend and usage), `channel` (switch off in one channel), `limits` (monthly budget, replies per member a day, web searches a day) |
+| `/admin ledger reminders` | Manage Server | Captain's Log nudges for Sea of Thieves crews at sail and back in port (on by default). `/admin ledger remove` takes a haul out by its entry number |
 | `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
 | `/admin birthdays hour` | Manage Server | Hour the toast goes out, 0 to 23 (default 9 = 9:00 AM) |
@@ -67,6 +73,15 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - Limits: a monthly dollar budget (default $5) and replies per member per day (default 20); with Kagi, also web searches per day (default 25, about 1.5¢ each, billed by Kagi). When a limit is hit, it says so in character.
 - It only answers in channels everyone can see, so staff channels are left out, and not to newcomers still on the gangplank. Quartermasters can switch it off per channel.
 - Set a spend limit in the Anthropic Console as well, as a backstop.
+
+### How the Ship's Ledger works
+
+- Pirates register their ships with `/ship register`. `/crew start` for Sea of Thieves sails your ship automatically if you have just one (pick another with `ship`); a ship also sets the crew size when you don't.
+- When a Sea of Thieves crew sets sail, PlunderBot reminds the ship's owner (or the captain) to screenshot the Captain's Log two-page spread before logging off. When the crew is back in port (it sailed at least 15 minutes with someone in voice), it asks for the screenshot with `/ship log`.
+- `/ship log` picks the crew you sailed with most recently (within 18 hours; or pick one), reads the screenshot with Claude Haiku (gold, doubloons, emissary, reputation, voyage stats), and shows it only to you with **Confirm**, **Edit** (a form to fix anything) and **Cancel**. Nothing is saved until you confirm.
+- A confirmed haul is posted as a reply to the crew card, shown on the card, and credited in full to the ship and every pirate aboard (as in the game, everyone gets the full haul). One haul per crew: logging again replaces it, if you're the captain, the ship's owner or whoever logged it.
+- Reading a screenshot costs about a third of a cent and counts toward Parley's monthly budget (`/admin parley limits`). With the budget spent, or no Anthropic key, you type the haul in instead. Screenshots aren't kept.
+- The weekly Ship's Log adds the week's plunder, and Parley can answer "who's the richest pirate?".
 
 ### How the Ship's Log and Crow's Nest work
 
@@ -196,7 +211,8 @@ With `DEV_GUILD_ID` set, commands sync to that one server instantly instead of g
 | `plunderbot/birthday_logic.py` | Date rules: leap days, next birthday, when to toast, change limits |
 | `plunderbot/games.py` | The game profiles |
 | `plunderbot/crew_logic.py` | Crew Call rules and the crew card |
-| `plunderbot/cogs/` | Features: `core`, `admin`, `birthdays`, `crew` |
+| `plunderbot/ledger_logic.py` | The Ship's Ledger: reading a Captain's Log, profiles and hauls |
+| `plunderbot/cogs/` | Features: `core`, `admin`, `birthdays`, `crew`, `voyages`, `regions`, `gangplank`, `colours`, `noticeboard`, `shipslog`, `crowsnest`, `parley`, `ledger` |
 | `exocomp_telemetry.py` | Exocomp's telemetry helper, vendored |
 
 ## Rules of the ship

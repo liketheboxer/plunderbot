@@ -81,7 +81,8 @@ def voice_channel_name(profile: GameProfile, size_label: str, captain_name: str,
     return f"{emoji} | {captain_name}'s {channel_subject(profile, size_label)}"[:100]
 
 
-def render_card(crew: Crew, profile: GameProfile, emoji: str | None = None) -> discord.Embed:
+def render_card(crew: Crew, profile: GameProfile, emoji: str | None = None, ship: str | None = None,
+                haul: str | None = None) -> discord.Embed:
     emoji = emoji or default_for(profile, crew.size_label)
     if profile.open_ended:
         return _render_hangout(crew, profile, emoji)
@@ -105,11 +106,15 @@ def render_card(crew: Crew, profile: GameProfile, emoji: str | None = None) -> d
     embed.add_field(name="Crew", value=f"{len(crew.members)} / {crew.capacity}", inline=True)
     if crew.activity:
         embed.add_field(name="Activity", value=crew.activity, inline=True)
+    if ship:
+        embed.add_field(name="Ship", value=ship, inline=True)
     embed.add_field(name="Seats", value="\n".join(seats), inline=False)
     if crew.note:
         embed.add_field(name="Captain's note", value=crew.note[:1024], inline=False)
     if crew.status == "sailing" and crew.voice_channel_id:
         embed.add_field(name="Voice", value=f"<#{crew.voice_channel_id}>", inline=False)
+    if haul:
+        embed.add_field(name="Haul", value=haul, inline=False)
     if crew.status == "open":
         expires = int(parse(crew.expires_at).timestamp())
         embed.set_footer(text="Join below. The captain can set sail any time; a full crew sails itself.")

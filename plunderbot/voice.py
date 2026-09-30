@@ -344,6 +344,93 @@ LINES: dict[str, list[str]] = {
     "parley_error": [
         "{cuss} My gears jammed trying to answer that. Try again in a moment?",
     ],
+    "ledger_sail_reminder": [
+        "📸 {captain}, one small favour for the ledger: before you leave the game, open the Captain's Log and "
+        "screenshot the two-page spread with your Gold. Post it here afterwards with `/ship log`!",
+        "📸 Ledger duty, {captain}! When the voyage is done, screenshot the Captain's Log (the two-page spread "
+        "with your Gold) before you log off, then hand it to me with `/ship log`.",
+    ],
+    "ledger_end_ask": [
+        "Welcome back to port, {captain}! Post the haul with `/ship log` and your Captain's Log screenshot, and "
+        "I'll write it in the ledger.",
+        "{cuss} What a voyage! {captain}, drop your Captain's Log screenshot into `/ship log` and I'll tally the plunder.",
+    ],
+    "ledger_logged": [
+        "Written in the ledger! {haul}",
+        "{cuss} Now that's a haul! {haul} Written in the ledger.",
+        "The ledger grows heavier: {haul}",
+    ],
+    "ledger_check": [
+        "Here's what I read. Does it look right?",
+        "I squinted at your Captain's Log and here's what I made of it. All shipshape?",
+    ],
+    "ledger_manual": [
+        "Ready when you are! Press Edit to write in the haul, then Confirm.",
+    ],
+    "ledger_not_a_log": [
+        "{cuss} That doesn't look like a Captain's Log to me. Try the two-page spread with your Gold, or press "
+        "Edit to type the haul in yourself.",
+    ],
+    "ledger_read_failed": [
+        "{cuss} I couldn't make out that screenshot. Press Edit to type the haul in yourself.",
+    ],
+    "ledger_no_budget": [
+        "{cuss} The grog budget for reading screenshots is spent this month. Press Edit to type the haul in yourself.",
+    ],
+    "ledger_bad_image": [
+        "{cuss} I couldn't open that picture ({error}). A PNG or JPG screenshot works best.",
+    ],
+    "ledger_confirmed": [
+        "Logged! It's on the crew card and in the ledger.",
+        "Signed, sealed and inked in the ledger!",
+    ],
+    "ledger_confirmed_no_crew": [
+        "Logged in the ledger! (No crew card to post it on, so it's just in the books.)",
+    ],
+    "ledger_cancelled": [
+        "Tossed overboard. Nothing was logged.",
+    ],
+    "ledger_gone": [
+        "{cuss} That reading has drifted off. Run `/ship log` again.",
+    ],
+    "ledger_not_yours": [
+        "Only the pirate who posted this reading can confirm or change it.",
+    ],
+    "ledger_replace_denied": [
+        "{cuss} That crew's haul is already in the ledger, and only its captain, the ship's owner or whoever "
+        "logged it can replace it.",
+    ],
+    "ledger_bad_number": [
+        "{cuss} I couldn't read {error} as a number. Try again with plain digits, like 12,345.",
+    ],
+    "ship_registered": [
+        "Welcome to the fleet, {ship}! Pick her with `/crew start` and her voyages will fill the ledger.",
+        "{cuss} What a beauty! {ship} is registered. Pick her when you start a Sea of Thieves crew.",
+    ],
+    "ship_updated": [
+        "{ship} has had a fresh coat of paint. Changes saved!",
+    ],
+    "ship_retired": [
+        "{ship} has been retired to the harbour with full honours. Her ledger stays in the books.",
+    ],
+    "ship_not_yours": [
+        "{cuss} That's not your ship to change!",
+    ],
+    "ship_unknown": [
+        "{cuss} I can't find that ship. Pick one from the list.",
+    ],
+    "ship_none": [
+        "You haven't registered a ship yet. `/ship register` gets her in the books!",
+    ],
+    "ship_too_many": [
+        "{cuss} Ten ships is quite the fleet! Retire one with `/ship retire` before registering another.",
+    ],
+    "ship_name_taken": [
+        "You already have a ship called {ship}. Give this one a name of her own!",
+    ],
+    "pirate_saved": [
+        "Your pirate profile is updated. Looking dashing!",
+    ],
     "guild_only": [
         "{cuss} That order only works aboard the ship, not in private messages.",
     ],

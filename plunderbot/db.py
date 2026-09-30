@@ -305,6 +305,54 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (guild_id, channel_id)
     );
     """,
+    # 16: the Ship's Ledger: pirates' ships, Captain's Log hauls, pirate profiles
+    """
+    CREATE TABLE ships (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id   INTEGER NOT NULL,
+        owner_id   INTEGER NOT NULL,
+        name       TEXT NOT NULL,
+        kind       TEXT NOT NULL,
+        motto      TEXT,
+        image      TEXT,
+        created_at TEXT NOT NULL,
+        retired    INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX ships_owner ON ships (guild_id, owner_id);
+    ALTER TABLE crews ADD COLUMN ship_id INTEGER;
+    CREATE TABLE ship_logs (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id     INTEGER NOT NULL,
+        crew_id      INTEGER,
+        ship_id      INTEGER,
+        logged_by    INTEGER NOT NULL,
+        created_at   TEXT NOT NULL,
+        confirmed_at TEXT,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        source       TEXT NOT NULL DEFAULT 'screenshot',
+        gold         INTEGER NOT NULL DEFAULT 0,
+        doubloons    INTEGER NOT NULL DEFAULT 0,
+        emissary     TEXT,
+        reputation   TEXT NOT NULL DEFAULT '[]',
+        stats        TEXT NOT NULL DEFAULT '[]',
+        channel_id   INTEGER,
+        message_id   INTEGER
+    );
+    CREATE INDEX ship_logs_crew ON ship_logs (crew_id);
+    CREATE TABLE ship_log_pirates (
+        log_id  INTEGER NOT NULL REFERENCES ship_logs (id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL,
+        PRIMARY KEY (log_id, user_id)
+    );
+    CREATE TABLE pirate_profiles (
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        gamertag TEXT,
+        motto    TEXT,
+        PRIMARY KEY (guild_id, user_id)
+    );
+    ALTER TABLE guild_settings ADD COLUMN ledger_reminders INTEGER NOT NULL DEFAULT 1;
+    """,
 ]
 
 
@@ -342,6 +390,7 @@ class GuildSettings:
     parley_budget_cents: int = 500
     parley_daily: int = 20
     parley_kagi_daily: int = 25
+    ledger_reminders: int = 1
 
 
 @dataclass
@@ -407,7 +456,7 @@ class Boarding:
     reminded_at: str | None = None
 
 
-_SETTING_COLUMNS = {"parley_enabled", "parley_budget_cents", "parley_daily", "parley_kagi_daily",
+_SETTING_COLUMNS = {"ledger_reminders", "parley_enabled", "parley_budget_cents", "parley_daily", "parley_kagi_daily",
                     "shipslog_channel_id", "shipslog_weekday", "shipslog_hour", "shipslog_last",
                     "crowsnest_enabled", "forum_channel_id", "gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
                     "rules_channel_id", "orientation_channel_id", "gangplank_alert_channel_id",
@@ -478,6 +527,7 @@ class Crew:
     ended_at: str | None
     title: str | None = None
     image: str | None = None
+    ship_id: int | None = None
     members: list[int] = field(default_factory=list)  # join order, captain first
 
     @property
@@ -490,7 +540,57 @@ class Crew:
 
 
 _CREW_COLUMNS = {"message_id", "status", "voice_channel_id", "voice_empty_since", "voice_occupied",
-                 "sailed_at", "ended_at", "title", "image"}
+                 "sailed_at", "ended_at", "title", "image", "ship_id"}
+
+
+@dataclass
+class Ship:
+    id: int
+    guild_id: int
+    owner_id: int
+    name: str
+    kind: str
+    motto: str | None
+    image: str | None
+    created_at: str
+    retired: int = 0
+
+
+_SHIP_COLUMNS = {"name", "kind", "motto", "image", "retired"}
+
+
+@dataclass
+class ShipLog:
+    """One voyage's haul, read from a Captain's Log screenshot (or typed in)."""
+    id: int
+    guild_id: int
+    crew_id: int | None
+    ship_id: int | None
+    logged_by: int
+    created_at: str
+    confirmed_at: str | None
+    status: str  # pending | confirmed
+    source: str  # screenshot | manual
+    gold: int
+    doubloons: int
+    emissary: str | None
+    reputation: str  # JSON [[company, amount], ...]
+    stats: str       # JSON [[label, value], ...]
+    channel_id: int | None
+    message_id: int | None
+    pirates: list[int] = field(default_factory=list)
+
+
+_LOG_COLUMNS = {"crew_id", "ship_id", "confirmed_at", "status", "source", "gold", "doubloons", "emissary",
+                "reputation", "stats", "channel_id", "message_id"}
+
+
+@dataclass
+class Totals:
+    logs: int = 0
+    gold: int = 0
+    doubloons: int = 0
+    best_gold: int = 0
 
 
 class Database:
@@ -1152,4 +1252,169 @@ class Database:
     async def prune_parley_usage(self, before_day: str) -> None:
         await self.conn.execute("DELETE FROM parley_usage WHERE day < ?", (before_day,))
         await self.conn.execute("DELETE FROM parley_lookups WHERE day < ?", (before_day,))
+        await self.conn.commit()
+
+    # ------------------------------------------------------------ the Ship's Ledger: ships
+    async def create_ship(self, *, guild_id: int, owner_id: int, name: str, kind: str, motto: str | None,
+                          image: str | None, created_at: str) -> Ship:
+        cur = await self.conn.execute(
+            "INSERT INTO ships (guild_id, owner_id, name, kind, motto, image, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (guild_id, owner_id, name, kind, motto, image, created_at))
+        await self.conn.commit()
+        return await self.get_ship(cur.lastrowid)
+
+    async def get_ship(self, ship_id: int | None) -> Ship | None:
+        if ship_id is None:
+            return None
+        row = await (await self.conn.execute("SELECT * FROM ships WHERE id = ?", (ship_id,))).fetchone()
+        return Ship(**{k: row[k] for k in row.keys()}) if row else None
+
+    async def ships(self, guild_id: int, owner_id: int | None = None, include_retired: bool = False) -> list[Ship]:
+        sql, args = "SELECT * FROM ships WHERE guild_id = ?", [guild_id]
+        if owner_id is not None:
+            sql += " AND owner_id = ?"
+            args.append(owner_id)
+        if not include_retired:
+            sql += " AND retired = 0"
+        rows = await (await self.conn.execute(sql + " ORDER BY name COLLATE NOCASE", args)).fetchall()
+        return [Ship(**{k: r[k] for k in r.keys()}) for r in rows]
+
+    async def update_ship(self, ship_id: int, **values) -> Ship | None:
+        bad = set(values) - _SHIP_COLUMNS
+        if bad:
+            raise ValueError(f"Unknown ship fields: {', '.join(sorted(bad))}")
+        if values:
+            cols = ", ".join(f"{k} = ?" for k in values)
+            await self.conn.execute(f"UPDATE ships SET {cols} WHERE id = ?", (*values.values(), ship_id))
+            await self.conn.commit()
+        return await self.get_ship(ship_id)
+
+    # ------------------------------------------------------------ the Ship's Ledger: Captain's Log hauls
+    async def create_log(self, *, guild_id: int, crew_id: int | None, ship_id: int | None, logged_by: int,
+                         created_at: str, source: str, gold: int, doubloons: int, emissary: str | None,
+                         reputation: str, stats: str, pirates: list[int]) -> ShipLog:
+        cur = await self.conn.execute(
+            "INSERT INTO ship_logs (guild_id, crew_id, ship_id, logged_by, created_at, source, gold, doubloons, "
+            "emissary, reputation, stats) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (guild_id, crew_id, ship_id, logged_by, created_at, source, gold, doubloons, emissary, reputation, stats))
+        log_id = cur.lastrowid
+        await self.conn.executemany("INSERT OR IGNORE INTO ship_log_pirates (log_id, user_id) VALUES (?, ?)",
+                                    [(log_id, u) for u in dict.fromkeys(pirates)])
+        await self.conn.commit()
+        return await self.get_log(log_id)
+
+    async def get_log(self, log_id: int) -> ShipLog | None:
+        row = await (await self.conn.execute("SELECT * FROM ship_logs WHERE id = ?", (log_id,))).fetchone()
+        if row is None:
+            return None
+        entry = ShipLog(**{k: row[k] for k in row.keys()})
+        rows = await (await self.conn.execute(
+            "SELECT user_id FROM ship_log_pirates WHERE log_id = ? ORDER BY rowid", (log_id,))).fetchall()
+        entry.pirates = [r["user_id"] for r in rows]
+        return entry
+
+    async def update_log(self, log_id: int, **values) -> ShipLog | None:
+        bad = set(values) - _LOG_COLUMNS
+        if bad:
+            raise ValueError(f"Unknown log fields: {', '.join(sorted(bad))}")
+        if values:
+            cols = ", ".join(f"{k} = ?" for k in values)
+            await self.conn.execute(f"UPDATE ship_logs SET {cols} WHERE id = ?", (*values.values(), log_id))
+            await self.conn.commit()
+        return await self.get_log(log_id)
+
+    async def delete_log(self, log_id: int) -> bool:
+        cur = await self.conn.execute("DELETE FROM ship_logs WHERE id = ?", (log_id,))
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    async def confirmed_log_for_crew(self, crew_id: int) -> ShipLog | None:
+        row = await (await self.conn.execute(
+            "SELECT id FROM ship_logs WHERE crew_id = ? AND status = 'confirmed' ORDER BY id DESC LIMIT 1",
+            (crew_id,))).fetchone()
+        return await self.get_log(row["id"]) if row else None
+
+    async def prune_pending_logs(self, before: str) -> None:
+        await self.conn.execute("DELETE FROM ship_logs WHERE status = 'pending' AND created_at < ?", (before,))
+        await self.conn.commit()
+
+    async def logs_between(self, guild_id: int, start: str, end: str) -> list[ShipLog]:
+        rows = await (await self.conn.execute(
+            "SELECT id FROM ship_logs WHERE guild_id = ? AND status = 'confirmed' AND confirmed_at >= ? "
+            "AND confirmed_at < ? ORDER BY confirmed_at", (guild_id, start, end))).fetchall()
+        return [await self.get_log(r["id"]) for r in rows]
+
+    async def recent_logs(self, guild_id: int, *, ship_id: int | None = None, user_id: int | None = None,
+                          limit: int = 5) -> list[ShipLog]:
+        sql = "SELECT l.id FROM ship_logs l WHERE l.guild_id = ? AND l.status = 'confirmed'"
+        args: list = [guild_id]
+        if ship_id is not None:
+            sql += " AND l.ship_id = ?"
+            args.append(ship_id)
+        if user_id is not None:
+            sql += " AND EXISTS (SELECT 1 FROM ship_log_pirates p WHERE p.log_id = l.id AND p.user_id = ?)"
+            args.append(user_id)
+        rows = await (await self.conn.execute(sql + " ORDER BY l.confirmed_at DESC LIMIT ?", (*args, limit))).fetchall()
+        return [await self.get_log(r["id"]) for r in rows]
+
+    async def ledger_totals(self, guild_id: int, *, ship_id: int | None = None,
+                            user_id: int | None = None) -> Totals:
+        sql = ("SELECT COUNT(*) AS n, COALESCE(SUM(gold), 0) AS g, COALESCE(SUM(doubloons), 0) AS d, "
+               "COALESCE(MAX(gold), 0) AS best FROM ship_logs l WHERE l.guild_id = ? AND l.status = 'confirmed'")
+        args: list = [guild_id]
+        if ship_id is not None:
+            sql += " AND l.ship_id = ?"
+            args.append(ship_id)
+        if user_id is not None:
+            sql += " AND EXISTS (SELECT 1 FROM ship_log_pirates p WHERE p.log_id = l.id AND p.user_id = ?)"
+            args.append(user_id)
+        row = await (await self.conn.execute(sql, args)).fetchone()
+        return Totals(row["n"], row["g"], row["d"], row["best"])
+
+    async def ship_leaderboard(self, guild_id: int, limit: int = 10) -> list[tuple[int, int, int, int]]:
+        """(ship id, voyages logged, gold, doubloons), richest first."""
+        rows = await (await self.conn.execute(
+            "SELECT l.ship_id, COUNT(*) AS n, SUM(l.gold) AS g, SUM(l.doubloons) AS d FROM ship_logs l "
+            "JOIN ships s ON s.id = l.ship_id WHERE l.guild_id = ? AND l.status = 'confirmed' "
+            "GROUP BY l.ship_id ORDER BY g DESC, n DESC LIMIT ?", (guild_id, limit))).fetchall()
+        return [(r["ship_id"], r["n"], r["g"], r["d"]) for r in rows]
+
+    async def pirate_leaderboard(self, guild_id: int, limit: int = 10) -> list[tuple[int, int, int, int]]:
+        """(user id, voyages logged, gold, doubloons), richest first."""
+        rows = await (await self.conn.execute(
+            "SELECT p.user_id, COUNT(*) AS n, SUM(l.gold) AS g, SUM(l.doubloons) AS d FROM ship_log_pirates p "
+            "JOIN ship_logs l ON l.id = p.log_id WHERE l.guild_id = ? AND l.status = 'confirmed' "
+            "GROUP BY p.user_id ORDER BY g DESC, n DESC LIMIT ?", (guild_id, limit))).fetchall()
+        return [(r["user_id"], r["n"], r["g"], r["d"]) for r in rows]
+
+    async def shipmates(self, guild_id: int, ship_id: int, limit: int = 5) -> list[tuple[int, int]]:
+        """(user id, voyages) of the pirates who've sailed a ship most."""
+        rows = await (await self.conn.execute(
+            "SELECT p.user_id, COUNT(*) AS n FROM ship_log_pirates p JOIN ship_logs l ON l.id = p.log_id "
+            "WHERE l.guild_id = ? AND l.ship_id = ? AND l.status = 'confirmed' GROUP BY p.user_id "
+            "ORDER BY n DESC LIMIT ?", (guild_id, ship_id, limit))).fetchall()
+        return [(r["user_id"], r["n"]) for r in rows]
+
+    # ------------------------------------------------------------ pirate profiles
+    async def crew_history(self, guild_id: int, user_id: int) -> tuple[int, int, dict[str, int]]:
+        """(crews sailed, of those as captain, crews per game) for a member, all time."""
+        rows = await (await self.conn.execute(
+            "SELECT c.game_key, c.captain_id FROM crews c JOIN crew_members m ON m.crew_id = c.id "
+            "WHERE c.guild_id = ? AND m.user_id = ? AND c.sailed_at IS NOT NULL", (guild_id, user_id))).fetchall()
+        per_game: dict[str, int] = {}
+        for r in rows:
+            per_game[r["game_key"]] = per_game.get(r["game_key"], 0) + 1
+        return len(rows), sum(1 for r in rows if r["captain_id"] == user_id), per_game
+
+    async def pirate_profile(self, guild_id: int, user_id: int) -> tuple[str | None, str | None]:
+        row = await (await self.conn.execute(
+            "SELECT gamertag, motto FROM pirate_profiles WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id))).fetchone()
+        return (row["gamertag"], row["motto"]) if row else (None, None)
+
+    async def set_pirate_profile(self, guild_id: int, user_id: int, gamertag: str | None, motto: str | None) -> None:
+        await self.conn.execute(
+            "INSERT INTO pirate_profiles (guild_id, user_id, gamertag, motto) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (guild_id, user_id) DO UPDATE SET gamertag = excluded.gamertag, motto = excluded.motto",
+            (guild_id, user_id, gamertag, motto))
         await self.conn.commit()
