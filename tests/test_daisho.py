@@ -365,3 +365,44 @@ async def test_a_change_is_never_applied_twice(env):
     await cog.run_once(guild, now=1)
     assert cog.client.results == [(90001, "applied", "Article Once created.")]
     assert len(await bot.db.articles(10)) == 1
+
+
+async def test_applied_changes_survive_a_restart(env):
+    """1.0.1: what was applied is remembered in the database, not just in memory."""
+    bot, cog, guild = env
+    art = {"name": "Twice", "trigger": "keyword", "value": "twice", "actions": [{"type": "reply", "texts": ["hi"]}]}
+    change = dict(id=90002, section="articles", action="article.save", payload=art, by="Boxer")
+    cog.client.queue = [change]
+    await cog.run_once(guild, now=0)
+    cog.done.clear()                     # as if PlunderBot restarted before Daisho heard
+    cog.client.queue = [change]
+    cog.client.results.clear()
+    await cog.run_once(guild, now=1)
+    assert cog.client.results == [(90002, "applied", "Article Twice created.")]
+    assert len([a for a in await bot.db.articles(10) if a.name == "Twice"]) == 1
+
+
+async def test_a_garbled_change_never_blocks_the_rest(env):
+    bot, cog, guild = env
+    cog.client.queue = ["garbage", {"id": "x"}, {"id": True},
+                        dict(id=90003, section="settings", action="settings.update", payload="nope", by="Boxer"),
+                        dict(id=90004, section="settings", action="settings.update",
+                             payload={"fields": {"crew_cleanup_minutes": 12}}, by="Boxer")]
+    cog.client.results.clear()
+    await cog.run_once(guild, now=0)
+    assert [(c, s) for c, s, _ in cog.client.results] == [(90003, "failed"), (90004, "applied")]
+
+
+async def test_roles_from_daisho_get_the_slash_command_checks(env):
+    """1.0.1: @everyone, or a role above PlunderBot's, can't be set as a Gangplank role from Daisho."""
+    bot, cog, guild = env
+    res = await run(cog, guild,
+                    ("settings", "settings.update", {"fields": {"pending_role_id": 1}}),
+                    ("settings", "settings.update", {"fields": {"harbormaster_role_id": 1}}),
+                    ("settings", "settings.update", {"fields": {"harbormaster_role_id": 30}}))
+    assert [s for _, s, _ in res] == ["failed", "failed", "applied"]
+    guild.roles.append(Role(60, "Admiralty", 60))
+    guild.me.guild_permissions = SimpleNamespace(manage_roles=True, kick_members=True)
+    res = await run(cog, guild, ("settings", "settings.update", {"fields": {"pending_role_id": 60}}),
+                    ("settings", "settings.update", {"fields": {"pending_role_id": 31}}))
+    assert [s for _, s, _ in res] == ["failed", "applied"]

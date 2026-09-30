@@ -395,6 +395,16 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (guild_id, user_id, role_id)
     );
     """,
+    # 1.0.1: Daisho changes already applied, so a restart between applying one and reporting it
+    # never applies it twice.
+    """
+    CREATE TABLE daisho_done (
+        change_id INTEGER PRIMARY KEY,
+        status    TEXT NOT NULL,
+        message   TEXT NOT NULL,
+        at        TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -670,6 +680,19 @@ class Database:
             await c.executescript(f"BEGIN;\n{sql}\nINSERT INTO schema_version VALUES ({number});\nCOMMIT;")
             current = number
         return current
+
+    # ------------------------------------------------------------ Daisho changes (1.0.1)
+    async def daisho_done(self, change_id: int) -> tuple[str, str] | None:
+        row = await (await self.conn.execute(
+            "SELECT status, message FROM daisho_done WHERE change_id = ?", (change_id,))).fetchone()
+        return (row["status"], row["message"]) if row else None
+
+    async def record_daisho_done(self, change_id: int, status: str, message: str) -> None:
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO daisho_done (change_id, status, message, at) VALUES (?, ?, ?, datetime('now'))",
+            (change_id, status, message[:2000]))
+        await self.conn.execute("DELETE FROM daisho_done WHERE at < datetime('now', '-30 days')")
+        await self.conn.commit()
 
     # ------------------------------------------------------------ settings
     async def get_settings(self, guild_id: int) -> GuildSettings:

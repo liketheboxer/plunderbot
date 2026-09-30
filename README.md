@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.0.0 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho). The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.0.1 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho). The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -50,7 +50,6 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin crew autopings` | Manage Server | Match every game to its ping role by name (ignores case, spaces and punctuation); with `create_missing:True`, create mentionable, permission-free roles for games that have none |
 | `/admin crew emoji` | Manage Server | Emoji for a game's crew cards and voice channels, for every size or one size (e.g. separate Sloop, Brigantine and Galleon emoji). Standard emoji or server emoji; `reset` restores the default |
 | `/admin crew pingrole` | Manage Server | Opt-in role pinged when a crew call opens for a game (at most every 15 minutes per game) |
-
 | `/admin voyages channel` | Manage Server | Where voyage cards are posted (e.g. #brimstone-events); empty = wherever `/voyage create` is used |
 
 ### How Colours (role menus) work
@@ -78,9 +77,10 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 ### How the Daisho screens work
 
 - PlunderBot's module in The Magical Samurai (Daisho, `daisho.magicalsamurai.com`) has screens for its settings, articles, Notice Board pages, voyages, crews and the Ship's Ledger, for crew with access to the PlunderBot unit there. Its manual is in Daisho under **Manual › PlunderBot**.
-- PlunderBot keeps its own data and sends Daisho a copy: what changed every five minutes, everything every half hour. Changes made on the screens are picked up within about 15 seconds, applied with the same checks as the slash commands, and reported back (done, or refused and why).
+- PlunderBot keeps its own data and sends Daisho a copy: what changed every five minutes, everything every half hour. Changes made on the screens are picked up within about 15 seconds, applied with the same checks as the slash commands, and reported back (done, or refused and why). PlunderBot remembers which changes it has applied, so a restart never applies one twice, and skips anything garbled.
+- PlunderBot can't see who made a change on the screens: Daisho's permission keys decide that. Editing articles and Notice Board pages there is Commander-only by default, since in Discord they need Manage Server.
 - To connect it: on the unit's page in Daisho, the Captain picks **PlunderBot** as its module and issues a module token with all three scopes, then refits. Exocomp hands over `SAMURAI_URL`, `SAMURAI_PUBLIC_URL` and `SAMURAI_MODULE_TOKEN`.
-- Once connected, voyage and crew cards get a **Manage** button that opens them in Daisho.
+- Once connected, voyage and crew cards get a **Manage** button that opens them in Daisho (it works for people with access to the unit there; anyone else is turned away).
 - If Daisho is down, PlunderBot carries on and catches up when it's back.
 
 ### How Articles work
@@ -145,10 +145,10 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 ### 1. Discord application
 
 1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application named **PlunderBot** and give it an avatar.
-2. **Bot** tab: turn on **Server Members Intent** and **Message Content Intent** (for importing old posts, and later Parley and Articles). Leave Presence off.
+2. **Bot** tab: turn on **Server Members Intent** and **Message Content Intent** (for importing old posts, Parley and Articles). Leave Presence off.
 3. **Bot** tab: **Reset Token** and keep the token for step 3. Never paste it in chat or commit it.
-4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**, **Kick Members**, **Read Message History**, **Add Reactions**, **Attach Files**, **Manage Threads**. Open the URL and add PlunderBot to Brimstone Hill Fortress.
-5. In **Server Settings › Roles**, drag PlunderBot's role **above** any role it should hand out (the birthday role now, the Colours roles later).
+4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**, **Kick Members**, **Read Message History**, **Add Reactions**, **Attach Files**, **Manage Threads**, **Manage Messages** (for articles that pin). Open the URL and add PlunderBot to Brimstone Hill Fortress.
+5. In **Server Settings › Roles**, drag PlunderBot's role **above** any role it should hand out (the birthday role, the Colours roles, the Gangplank's Pending role, and any role an article gives).
 
 ### 2. GitHub
 
@@ -206,7 +206,7 @@ The bot keeps its database at `/data/plunderbot.db` and runs as user 10001. Exoc
 
 ## Telemetry
 
-On top of Exocomp's standard numbers (latency, servers, commands, errors), PlunderBot reports the gauges `birthdays_on_file`, `crews_mustering` and `crews_sailing`. Background errors are reported as `birthday-announcer`, `crew-upkeep` and `crew-voice`.
+On top of Exocomp's standard numbers (latency, servers, commands, errors), PlunderBot reports the gauges `birthdays_on_file`, `crews_mustering`, `crews_sailing`, `voyages_scheduled` and `gangplank_waiting`. Background errors are reported as `birthday-announcer`, `crew-upkeep`, `crew-voice`, `voyage-clock`, `articles-clock` and `daisho`.
 
 ## Developing
 

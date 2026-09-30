@@ -175,6 +175,10 @@ class Daisho(commands.Cog):
     async def run_once(self, guild: discord.Guild, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
         for change in await self.client.changes():
+            if not isinstance(change, dict) or isinstance(change.get("id"), bool) \
+                    or not isinstance(change.get("id"), int):
+                log.warning("Skipping a malformed change from Daisho")   # never let one block the rest
+                continue
             await self.handle(guild, change)
         force = now - self.last_force >= FORCE_EVERY
         check_all = force or now - self.last_push >= PUSH_EVERY
@@ -207,14 +211,19 @@ class Daisho(commands.Cog):
 
     async def handle(self, guild: discord.Guild, change: dict) -> None:
         action, cid = change.get("action"), change.get("id")
-        if cid in self.done:   # applied already, but Daisho never heard: just tell it again
-            await self.client.result(cid, *self.done[cid])
+        # Applied already, but Daisho never heard (even across a restart): just tell it again
+        earlier = self.done.get(cid) or await self.bot.db.daisho_done(cid)
+        if earlier:
+            await self.client.result(cid, *earlier)
             return
         handler = HANDLERS.get(action)
+        payload = change.get("payload")
         try:
             if handler is None:
                 raise ApplyError(f"This version of PlunderBot doesn't know how to {action}. Refit it.")
-            message = await handler(self, guild, change.get("payload") or {})
+            if payload is not None and not isinstance(payload, dict):
+                raise ApplyError("That change arrived garbled; make it again.")
+            message = await handler(self, guild, payload or {})
             status = "applied"
         except ApplyError as e:
             message, status = str(e), "failed"
@@ -224,6 +233,7 @@ class Daisho(commands.Cog):
             if self.bot.telemetry is not None:
                 self.bot.telemetry.error(e, command="daisho")
         self.done[cid] = (status, message or "Done.")
+        await self.bot.db.record_daisho_done(cid, status, message or "Done.")
         if len(self.done) > 500:
             for old in sorted(self.done)[:250]:
                 del self.done[old]
@@ -368,10 +378,18 @@ class Daisho(commands.Cog):
             role = guild.get_role(value)
             if role is None:
                 raise ApplyError("That role no longer exists.")
+            if role.is_default() or role.managed:   # the same rule /admin gangplank setup applies (1.0.1)
+                raise ApplyError("Pick an ordinary role, not @everyone or a role another app manages.")
             if key == "birthday_role_id":
                 problem = self_serve_problem(role, guild.me)
                 if problem:
                     raise ApplyError(problem)
+            if key == "pending_role_id":
+                me = guild.me
+                if not me.guild_permissions.manage_roles or role >= me.top_role:
+                    raise ApplyError(f"PlunderBot needs Manage Roles and its role above {role.name}.")
+                if not me.guild_permissions.kick_members:
+                    raise ApplyError("PlunderBot needs Kick Members to turn people away.")
             return value
         channel = guild.get_channel(value)
         if channel is None or (kind == "text" and not isinstance(channel, discord.TextChannel)) or \

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 (2026-09-30): Daisho hardening
+
+Fixes from a security check of PlunderBot and its Daisho screens. Pairs with The Magical Samurai 1.12.1.
+
+- A Gangplank role set from Daisho gets the same checks as `/admin gangplank setup`: never @everyone or a role another app manages, and for the Pending role, PlunderBot needs Manage Roles, Kick Members and its role above it.
+- PlunderBot remembers the Daisho changes it has applied in its database (for 30 days), so a restart between applying one and reporting it never applies it twice.
+- A garbled change from Daisho is skipped (or refused with a reason) instead of holding up the ones behind it.
+- README: the invite permissions include Manage Messages (articles that pin), the full telemetry list, and what the Daisho screens can and can't check.
+
 ## 1.0.0 (2026-09-29): Daisho
 
 Phase 9, the last of the plan. Needs The Magical Samurai 1.11.0.
