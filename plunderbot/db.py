@@ -271,6 +271,40 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (guild_id, game_key, item_id)
     );
     """,
+    # 15: Parley, PlunderBot answering in chat: settings, limits and spending
+    """
+    ALTER TABLE guild_settings ADD COLUMN parley_enabled INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE guild_settings ADD COLUMN parley_budget_cents INTEGER NOT NULL DEFAULT 500;
+    ALTER TABLE guild_settings ADD COLUMN parley_daily INTEGER NOT NULL DEFAULT 20;
+    ALTER TABLE guild_settings ADD COLUMN parley_kagi_daily INTEGER NOT NULL DEFAULT 25;
+    CREATE TABLE parley_usage (
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        day      TEXT NOT NULL,
+        replies  INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, user_id, day)
+    );
+    CREATE TABLE parley_spend (
+        guild_id      INTEGER NOT NULL,
+        month         TEXT NOT NULL,
+        dollars       REAL NOT NULL DEFAULT 0,
+        calls         INTEGER NOT NULL DEFAULT 0,
+        input_tokens  INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, month)
+    );
+    CREATE TABLE parley_lookups (
+        guild_id INTEGER NOT NULL,
+        day      TEXT NOT NULL,
+        lookups  INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, day)
+    );
+    CREATE TABLE parley_off_channels (
+        guild_id   INTEGER NOT NULL,
+        channel_id INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, channel_id)
+    );
+    """,
 ]
 
 
@@ -304,6 +338,10 @@ class GuildSettings:
     shipslog_hour: int = 18
     shipslog_last: str | None = None
     crowsnest_enabled: int = 0
+    parley_enabled: int = 0
+    parley_budget_cents: int = 500
+    parley_daily: int = 20
+    parley_kagi_daily: int = 25
 
 
 @dataclass
@@ -369,7 +407,8 @@ class Boarding:
     reminded_at: str | None = None
 
 
-_SETTING_COLUMNS = {"shipslog_channel_id", "shipslog_weekday", "shipslog_hour", "shipslog_last",
+_SETTING_COLUMNS = {"parley_enabled", "parley_budget_cents", "parley_daily", "parley_kagi_daily",
+                    "shipslog_channel_id", "shipslog_weekday", "shipslog_hour", "shipslog_last",
                     "crowsnest_enabled", "forum_channel_id", "gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
                     "rules_channel_id", "orientation_channel_id", "gangplank_alert_channel_id",
                     "approve_emoji", "reject_emoji", "gangplank_remind_days", "gangplank_kick_days",
@@ -1056,3 +1095,61 @@ class Database:
             "SELECT game_key, title, url FROM news_seen WHERE guild_id = ? AND posted = 1 AND seen_at >= ? "
             "AND seen_at < ? ORDER BY seen_at", (guild_id, start, end))).fetchall()
         return [(r["game_key"], r["title"], r["url"]) for r in rows]
+
+    # ------------------------------------------------------------ Parley
+    async def parley_replies(self, guild_id: int, user_id: int, day: str) -> int:
+        row = await (await self.conn.execute(
+            "SELECT replies FROM parley_usage WHERE guild_id = ? AND user_id = ? AND day = ?",
+            (guild_id, user_id, day))).fetchone()
+        return row["replies"] if row else 0
+
+    async def add_parley_reply(self, guild_id: int, user_id: int, day: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO parley_usage (guild_id, user_id, day, replies) VALUES (?, ?, ?, 1) "
+            "ON CONFLICT (guild_id, user_id, day) DO UPDATE SET replies = replies + 1", (guild_id, user_id, day))
+        await self.conn.commit()
+
+    async def parley_spend(self, guild_id: int, month: str) -> tuple[float, int]:
+        row = await (await self.conn.execute(
+            "SELECT dollars, calls FROM parley_spend WHERE guild_id = ? AND month = ?", (guild_id, month))).fetchone()
+        return (row["dollars"], row["calls"]) if row else (0.0, 0)
+
+    async def add_parley_spend(self, guild_id: int, month: str, dollars: float, input_tokens: int,
+                               output_tokens: int) -> None:
+        await self.conn.execute(
+            "INSERT INTO parley_spend (guild_id, month, dollars, calls, input_tokens, output_tokens) "
+            "VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT (guild_id, month) DO UPDATE SET dollars = dollars + excluded.dollars, "
+            "calls = calls + 1, input_tokens = input_tokens + excluded.input_tokens, "
+            "output_tokens = output_tokens + excluded.output_tokens",
+            (guild_id, month, dollars, input_tokens, output_tokens))
+        await self.conn.commit()
+
+    async def parley_lookups(self, guild_id: int, day: str) -> int:
+        row = await (await self.conn.execute(
+            "SELECT lookups FROM parley_lookups WHERE guild_id = ? AND day = ?", (guild_id, day))).fetchone()
+        return row["lookups"] if row else 0
+
+    async def add_parley_lookup(self, guild_id: int, day: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO parley_lookups (guild_id, day, lookups) VALUES (?, ?, 1) "
+            "ON CONFLICT (guild_id, day) DO UPDATE SET lookups = lookups + 1", (guild_id, day))
+        await self.conn.commit()
+
+    async def parley_off_channels(self, guild_id: int) -> set[int]:
+        rows = await (await self.conn.execute(
+            "SELECT channel_id FROM parley_off_channels WHERE guild_id = ?", (guild_id,))).fetchall()
+        return {r["channel_id"] for r in rows}
+
+    async def set_parley_channel(self, guild_id: int, channel_id: int, on: bool) -> None:
+        if on:
+            await self.conn.execute("DELETE FROM parley_off_channels WHERE guild_id = ? AND channel_id = ?",
+                                    (guild_id, channel_id))
+        else:
+            await self.conn.execute("INSERT OR IGNORE INTO parley_off_channels (guild_id, channel_id) VALUES (?, ?)",
+                                    (guild_id, channel_id))
+        await self.conn.commit()
+
+    async def prune_parley_usage(self, before_day: str) -> None:
+        await self.conn.execute("DELETE FROM parley_usage WHERE day < ?", (before_day,))
+        await self.conn.execute("DELETE FROM parley_lookups WHERE day < ?", (before_day,))
+        await self.conn.commit()

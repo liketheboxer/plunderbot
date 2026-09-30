@@ -18,6 +18,9 @@ class Config:
     default_timezone: str
     ready_file: Path
     log_level: str
+    anthropic_api_key: str | None = None
+    kagi_api_key: str | None = None
+    parley_model: str = "claude-haiku-4-5"
 
     @property
     def db_path(self) -> Path:
@@ -58,4 +61,7 @@ def load() -> Config:
         default_timezone=os.environ.get("DEFAULT_TIMEZONE", "America/Los_Angeles"),
         ready_file=Path(os.environ.get("READY_FILE", "/tmp/ready")),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() or None,
+        kagi_api_key=os.environ.get("KAGI_API_KEY", "").strip() or None,
+        parley_model=os.environ.get("PARLEY_MODEL", "").strip() or "claude-haiku-4-5",
     )

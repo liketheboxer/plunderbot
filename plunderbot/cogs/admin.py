@@ -44,6 +44,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
     gangplank = app_commands.Group(name="gangplank", description="Gangplank: the airlock in #introductions")
     shipslog = app_commands.Group(name="shipslog", description="The Ship's Log weekly roundup")
     crowsnest = app_commands.Group(name="crowsnest", description="The Crow's Nest: game news in each game's thread")
+    parley = app_commands.Group(name="parley", description="Parley: PlunderBot answering in chat")
 
     def __init__(self, bot):
         self.bot = bot
@@ -723,6 +724,71 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
                                             ephemeral=True)
             return
         await interaction.followup.send(embed=cog.embed(game.name, item), ephemeral=True)
+
+    # ------------------------------------------------------------ Parley
+    @parley.command(name="on", description="Let members chat with PlunderBot by @mentioning or replying to it")
+    async def parley_on(self, interaction: discord.Interaction) -> None:
+        if not self.bot.config.anthropic_api_key:
+            await interaction.response.send_message(
+                "Add the ANTHROPIC_API_KEY secret to PlunderBot in Exocomp and refit first.", ephemeral=True)
+            return
+        s = await self.bot.db.update_settings(interaction.guild_id, parley_enabled=1)
+        web = "with Kagi web search" if self.bot.config.kagi_api_key else "answering from what it knows (no web search)"
+        await interaction.response.send_message(
+            f"Parley is on, {web}. Members @mention PlunderBot or reply to it, in any channel everyone can see. "
+            f"Limits: ${s.parley_budget_cents / 100:.2f} a month, {s.parley_daily} replies per member a day"
+            + (f", {s.parley_kagi_daily} web searches a day" if self.bot.config.kagi_api_key else "")
+            + ". See /admin parley status.", ephemeral=True)
+
+    @parley.command(name="off", description="Stop PlunderBot answering in chat")
+    async def parley_off(self, interaction: discord.Interaction) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, parley_enabled=0)
+        await interaction.response.send_message("Parley is off. Slash commands carry on as normal.", ephemeral=True)
+
+    @parley.command(name="status", description="This month's spending and today's usage")
+    async def parley_status(self, interaction: discord.Interaction) -> None:
+        cog = self.bot.get_cog("Parley")
+        s = await self.bot.db.get_settings(interaction.guild_id)
+        day, month, _ = cog.today(s)
+        spent, calls = await self.bot.db.parley_spend(interaction.guild_id, month)
+        lookups = await self.bot.db.parley_lookups(interaction.guild_id, day)
+        off = await self.bot.db.parley_off_channels(interaction.guild_id)
+        cfg = self.bot.config
+        lines = [f"**Parley is {'on' if s.parley_enabled else 'off'}** (model {cfg.parley_model})",
+                 f"Claude key: {'set' if cfg.anthropic_api_key else 'missing'} · Web search: "
+                 f"{'on (Kagi)' if cfg.kagi_api_key else 'off (no Kagi key)'}",
+                 f"This month: ${spent:.2f} of ${s.parley_budget_cents / 100:.2f} ({calls} Claude calls)",
+                 f"Web searches today: {lookups} of {s.parley_kagi_daily} (about ${lookups * 0.015:.2f})",
+                 f"Replies per member per day: {s.parley_daily}"]
+        if off:
+            lines.append("Switched off in: " + ", ".join(f"<#{c}>" for c in off))
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @parley.command(name="channel", description="Switch Parley off (or back on) in one channel")
+    async def parley_channel(self, interaction: discord.Interaction, channel: discord.abc.GuildChannel,
+                             on: bool) -> None:
+        await self.bot.db.set_parley_channel(interaction.guild_id, channel.id, on)
+        await interaction.response.send_message(
+            f"Parley is {'back on' if on else 'off'} in {channel.mention}.", ephemeral=True)
+
+    @parley.command(name="limits", description="Monthly budget, replies per member per day, web searches per day")
+    @app_commands.describe(budget="Dollars a month for Claude", daily="Replies per member per day",
+                           searches="Kagi web searches per day (about 1.5 cents each)")
+    async def parley_limits(self, interaction: discord.Interaction,
+                            budget: app_commands.Range[float, 0, 100] | None = None,
+                            daily: app_commands.Range[int, 0, 200] | None = None,
+                            searches: app_commands.Range[int, 0, 500] | None = None) -> None:
+        changes = {}
+        if budget is not None:
+            changes["parley_budget_cents"] = int(round(budget * 100))
+        if daily is not None:
+            changes["parley_daily"] = daily
+        if searches is not None:
+            changes["parley_kagi_daily"] = searches
+        s = await self.bot.db.update_settings(interaction.guild_id, **changes)
+        await interaction.response.send_message(
+            f"Limits: ${s.parley_budget_cents / 100:.2f} a month, {s.parley_daily} replies per member a day, "
+            f"{s.parley_kagi_daily} web searches a day.", ephemeral=True)
 
 
 async def setup(bot) -> None:

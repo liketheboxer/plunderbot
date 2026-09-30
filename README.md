@@ -30,6 +30,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin gangplank setup` | Manage Server | Intro channel, Pending role, Harbormasters role, rules and orientation channels, optional alert channel. Then `on`/`off`, `emoji`, `timing`, `status` |
 | `/admin shipslog channel` | Manage Server | The weekly Ship's Log roundup: `channel` (empty turns it off), `when` (day and hour), `preview`, `post` |
 | `/admin crowsnest on` | Manage Server | Game news in each game's forum thread: `on`, `off`, `check`, `source` (Steam app, RSS/Atom feed, none or default), `preview` |
+| `/admin parley on` | Manage Server | Parley (PlunderBot answering in chat): `on`, `off`, `status` (spend and usage), `channel` (switch off in one channel), `limits` (monthly budget, replies per member a day, web searches a day) |
 | `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
 | `/admin birthdays hour` | Manage Server | Hour the toast goes out, 0 to 23 (default 9 = 9:00 AM) |
@@ -58,6 +59,14 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - A page is a list of sections; each is one embed with a heading, text (Markdown), colour and optional picture, either inside the section or as a banner above it. Write them in a pop-up form, or `/noticeboard import` existing messages (a picture on its own becomes a banner above the text after it).
 - `/noticeboard post` posts the page; posting again edits the same messages in place. Long pages spill over several messages.
 - `/noticeboard gameindex` posts the Game Index: every game with its forum thread and ping role, and a **Follow games** button. Run it again after adding threads or roles.
+
+### How Parley works
+
+- @mention PlunderBot, or reply to one of its messages, and it answers in character. Replying keeps the conversation going (it sees up to six earlier messages in the reply chain).
+- Claude Haiku does the talking. Server facts (voyages, crews, birthdays, games and threads, the Notice Board pages, its own commands) come from PlunderBot's database, never guessed. Without a Kagi key (the current setup) it answers other questions from what Claude knows and says when that may be out of date; with `KAGI_API_KEY` set it can search the web, capped per day. Slash commands never use AI.
+- Limits: a monthly dollar budget (default $5) and replies per member per day (default 20); with Kagi, also web searches per day (default 25, about 1.5¢ each, billed by Kagi). When a limit is hit, it says so in character.
+- It only answers in channels everyone can see, so staff channels are left out, and not to newcomers still on the gangplank. Quartermasters can switch it off per channel.
+- Set a spend limit in the Anthropic Console as well, as a backstop.
 
 ### How the Ship's Log and Crow's Nest work
 
@@ -141,7 +150,7 @@ The Brimstone department must exist first (**Departments**, Captain only), and T
 | GitHub key | the key from step 2, if the repo is private |
 | How is it built? | Repo has its own Dockerfile |
 | Settings | `DEV_GUILD_ID=<Brimstone Hill's server ID>` for the first run (commands appear instantly); optional `DEFAULT_TIMEZONE`, `LOG_LEVEL` |
-| Secrets | `DISCORD_TOKEN=<the bot token>` |
+| Secrets | `DISCORD_TOKEN=<the bot token>`; for Parley, `ANTHROPIC_API_KEY` (optional: `KAGI_API_KEY` for web search, `PARLEY_MODEL` setting, default `claude-haiku-4-5`) |
 | Memory limit | 512 MB |
 
 Press **Fabricate unit** and watch the job log. SUCCESS means the health check passed, which only happens once PlunderBot has connected to Discord. Then, on the unit's **Chief and departments** page, name Twiddles as Chief.

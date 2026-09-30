@@ -330,6 +330,20 @@ LINES: dict[str, list[str]] = {
         "Land ho! Fresh news for {game}:",
         "From the crow's nest: news about {game}!",
     ],
+    "parley_hello": [
+        "Ahoy! You rang? Ask me anything: voyages, crews, games, the rules, or the wider seas.",
+        "PlunderBot at your service! What can your butler fetch for you?",
+    ],
+    "parley_tired": [
+        "{cuss} My voice box needs a rest: that's your {daily} chats for today. Slash commands still work, and "
+        "I'll be all ears again tomorrow!",
+    ],
+    "parley_broke": [
+        "{cuss} The grog budget for chatting is spent until next month! Slash commands still work in the meantime.",
+    ],
+    "parley_error": [
+        "{cuss} My gears jammed trying to answer that. Try again in a moment?",
+    ],
     "guild_only": [
         "{cuss} That order only works aboard the ship, not in private messages.",
     ],

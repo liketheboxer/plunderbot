@@ -25,6 +25,7 @@ COGS = [
     "plunderbot.cogs.noticeboard",
     "plunderbot.cogs.shipslog",
     "plunderbot.cogs.crowsnest",
+    "plunderbot.cogs.parley",
 ]
 
 

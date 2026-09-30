@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1 (2026-09-29): Parley without web search
+
+- Kagi is optional. Without `KAGI_API_KEY`, PlunderBot answers from what it knows, says when something may be out of date, and points to the game's forum thread for official news. `/admin parley on` and `status` describe it that way.
+
+## 0.7.0 (2026-09-29): Parley
+
+Phase 6.
+
+- @mention PlunderBot or reply to it and it answers in character, using Claude Haiku 4.5. Replies keep the conversation going.
+- Server questions are answered from PlunderBot's own records through tools (voyages, crews, birthdays, games and threads, Notice Board pages, commands); current questions use a Kagi FastGPT web search.
+- Limits: $5 a month, 20 replies per member a day, 25 web searches a day, all adjustable with `/admin parley limits`. Spending is tracked per call.
+- Public channels only (staff channels left out), not for newcomers on the gangplank, off per channel with `/admin parley channel`. Off until `/admin parley on`.
+- New secrets: `ANTHROPIC_API_KEY`, `KAGI_API_KEY`. Without them Parley stays off; everything else carries on.
+
 ## 0.6.2 (2026-09-29): Fortnite news
 
 - Fortnite's news now comes built in: Epic's in-game news (the lobby news screen), via fortnite-api.com. No key needed.
