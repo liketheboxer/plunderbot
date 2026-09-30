@@ -226,3 +226,20 @@ async def test_crowsnest_first_look_then_new_posts(bot, monkeypatch):
     assert (await cog.check(guild))["sot"] == "nothing new"
     logged = await bot.db.news_posted_between(5, "2026-01-01", "2030-01-01")
     assert logged == [("sot", "Season 18", "https://x/2")]
+
+
+def test_sloppy_feeds_are_repaired():
+    sloppy = ("\ufeff<?xml version=\"1.0\"?><rss><channel><item><title>Skins &amp; stuff &nbsp;&hellip; Q&A</title>"
+              "<link>https://f.example/1?a=1&b=2</link><guid>f1</guid>"
+              "<description><![CDATA[<p>New &nbsp; skins & emotes</p>]]></description>"
+              "<pubDate>Tue, 29 Sep 2026 17:00:00 GMT</pubDate></item>\x0b</channel></rss>")
+    (item,) = parse_feed(sloppy)
+    assert item.title == "Skins & stuff \u00a0\u2026 Q&A"
+    assert item.url == "https://f.example/1?a=1&b=2" and item.summary == "New skins & emotes"
+
+
+def test_web_pages_and_broken_feeds_explain_themselves():
+    with pytest.raises(ValueError, match="web page"):
+        parse_feed("<!DOCTYPE html><html><head><title>Just a moment...</title></head></html>")
+    with pytest.raises(ValueError, match="too broken"):
+        parse_feed("<rss><channel><item><title>oops</item></rss>")

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1 (2026-09-29): Sturdier news feeds
+
+- The Crow's Nest reads feeds with the usual mistakes in them (HTML entities like `&nbsp;`, stray `&` and control characters), and says plainly when an address sends a web page instead of a feed.
+
 ## 0.6.0 (2026-09-29): The Ship's Log and the Crow's Nest
 
 Phase 5.

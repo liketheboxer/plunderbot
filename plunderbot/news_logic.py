@@ -134,9 +134,46 @@ def _date(text: str | None) -> datetime | None:
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
+_XML_ENTITIES = {"amp", "lt", "gt", "quot", "apos"}
+_BAD_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_ENTITY = re.compile(r"&(#\d+;|#x[0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]*;)?")
+
+
+def repair_xml(text: str) -> str:
+    """Make a sloppy feed parseable: HTML entities XML doesn't know (&nbsp;, &hellip;), bare ampersands
+    and stray control characters are all common in real feeds."""
+    from html.entities import name2codepoint
+
+    def fix(m: re.Match) -> str:
+        ent = m.group(1)
+        if ent is None:
+            return "&amp;"  # a bare & in text
+        if ent.startswith("#"):
+            return m.group(0)
+        name = ent[:-1]
+        if name in _XML_ENTITIES:
+            return m.group(0)
+        if name in name2codepoint:
+            return f"&#{name2codepoint[name]};"
+        return "&amp;" + ent
+    text = _BAD_CHARS.sub("", text)
+    parts = re.split(r"(<!\[CDATA\[.*?\]\]>)", text, flags=re.S)  # leave CDATA blocks alone
+    return "".join(p if p.startswith("<![CDATA[") else _ENTITY.sub(fix, p) for p in parts)
+
+
 def parse_feed(xml_text: str) -> list[NewsItem]:
-    """RSS 2.0 or Atom."""
-    root = ET.fromstring(xml_text)
+    """RSS 2.0 or Atom, tolerating the usual sloppiness."""
+    xml_text = xml_text.lstrip("\ufeff \r\n\t")
+    head = xml_text[:2000].lower()
+    if "<html" in head and "<rss" not in head and "<feed" not in head:
+        raise ValueError("that address sends a web page, not a news feed (the site may be blocking bots)")
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        try:
+            root = ET.fromstring(repair_xml(xml_text))
+        except ET.ParseError as e:
+            raise ValueError(f"that feed is too broken to read ({e})") from None
     entries = [e for e in root.iter() if _local(e.tag) in ("item", "entry")]
     out = []
     for e in entries:
