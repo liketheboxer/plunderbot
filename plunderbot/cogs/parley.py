@@ -170,6 +170,12 @@ class Parley(commands.Cog):
         return list(reversed(chain))
 
     # ------------------------------------------------------------ tools
+    async def game_activity(self, guild, now) -> str:
+        rows = await game_activity_lines(self.bot.db, guild, now)
+        lines = [f"- {n}: {c} crew(s) set sail with {p} different pirate(s) in the last 30 days, {f} follower(s)"
+                 + (f", {v} voyage(s) planned" if v else "") for n, c, p, f, v in rows]
+        return "Busiest first:\n" + "\n".join(lines)
+
     async def run_tool(self, guild: discord.Guild, s, name: str, args: dict, day: str) -> str:
         db = self.bot.db
         now = datetime.now(timezone.utc)
@@ -228,6 +234,8 @@ class Parley(commands.Cog):
                 for sec in p.sections:
                     out.append("\n".join(x for x in (sec.heading and f"## {sec.heading}", sec.body) if x))
             return "\n\n".join(out)[:6000]
+        if name == "game_activity":
+            return await self.game_activity(guild, now)
         if name == "plunderbot_commands":
             return COMMANDS_HELP
         if name == "search_web":
@@ -240,6 +248,31 @@ class Parley(commands.Cog):
             sources = "\n".join(f"- {r.get('title')}: {r.get('url')}" for r in refs[:3])
             return f"{answer}\n\nSources:\n{sources}" if sources else answer
         return f"Unknown tool {name}."
+
+
+async def game_activity_lines(db, guild, now) -> list[tuple]:
+    """(name, crews, pirates, followers, planned) per game, busiest first."""
+    from collections import defaultdict
+    from ..crew_logic import iso
+    crews = await db.crews_sailed_between(guild.id, iso(now - timedelta(days=30)), iso(now))
+    sailed, pirates = defaultdict(int), defaultdict(set)
+    for c in crews:
+        sailed[c.game_key] += 1
+        pirates[c.game_key].update(c.members)
+    planned = defaultdict(int)
+    for v in await db.voyages_starting_between(guild.id, iso(now), iso(now + timedelta(days=14))):
+        if v.status == "scheduled" and v.game_key:
+            planned[v.game_key] += 1
+    roles = await db.game_ping_roles(guild.id)
+    rows = []
+    for g in games.GAMES:
+        if not g.crew_call:
+            continue
+        role = guild.get_role(roles[g.key]) if g.key in roles and hasattr(guild, "get_role") else None
+        followers = len(role.members) if role is not None else 0
+        rows.append((g.name, sailed[g.key], len(pirates[g.key]), followers, planned[g.key]))
+    rows.sort(key=lambda r: (-r[1], -r[3], r[0]))
+    return rows
 
 
 async def setup(bot) -> None:

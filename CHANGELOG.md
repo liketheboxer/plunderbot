@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.2 (2026-09-29): Parley knows what's popular
+
+- New Parley tool, game activity: for each game, crews that set sail and different pirates who sailed in the last 30 days, members following it, and voyages planned in the next 14 days. Ask "what do people play here?"
+- Parley always writes slash commands in full (`/crew start`, never just `/crew`).
+
 ## 0.7.1 (2026-09-29): Parley without web search
 
 - Kagi is optional. Without `KAGI_API_KEY`, PlunderBot answers from what it knows, says when something may be out of date, and points to the game's forum thread for official news. `/admin parley on` and `status` describe it that way.

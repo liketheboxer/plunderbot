@@ -250,3 +250,21 @@ async def test_without_kagi_there_is_no_search_tool(env):
     call = cog.claude.calls[0]
     assert "search_web" not in [t["name"] for t in call["tools"]] and "can't search the web" in call["system"]
     assert msg.replies[0].startswith("From what I know")
+
+
+async def test_game_activity_counts_crews_and_followers(env):
+    from datetime import datetime, timedelta, timezone
+    from plunderbot.crew_logic import iso
+    bot, cog, guild = env
+    now = datetime.now(timezone.utc)
+    for cap, game in ((1, "sot"), (2, "sot"), (3, "drg")):
+        c = await bot.db.create_crew(guild_id=5, channel_id=1, captain_id=cap, game_key=game, size_label="x",
+                                     capacity=4, activity=None, note=None, created_at=iso(now), expires_at=iso(now))
+        await bot.db.update_crew(c.id, sailed_at=iso(now - timedelta(days=2)))
+    await bot.db.set_game_ping_role(5, "helldivers", 77)
+    guild.get_role = lambda rid: SimpleNamespace(members=[1, 2, 3, 4]) if rid == 77 else None
+    out = await cog.run_tool(guild, await bot.db.get_settings(5), "game_activity", {}, "2026-09-29")
+    lines = out.splitlines()[1:]
+    assert lines[0].startswith("- Sea of Thieves: 2 crew(s) set sail with 2 different pirate(s)")
+    assert lines[1].startswith("- Deep Rock Galactic: 1 crew(s)")
+    assert "- Helldivers 2: 0 crew(s) set sail with 0 different pirate(s) in the last 30 days, 4 follower(s)" in out
