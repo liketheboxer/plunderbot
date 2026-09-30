@@ -329,6 +329,75 @@ async def test_voyages_crews_and_the_ledger_from_daisho(env, monkeypatch):
     assert (await bot.db.get_ship(ship.id)).kind == "Brigantine" and await bot.db.get_log(e.id) is None
 
 
+async def test_members_plan_and_join_as_themselves(env, monkeypatch):
+    """1.2.0: members (Swabbies on Daisho) plan voyages, call crews, RSVP and join as themselves."""
+    bot, cog, guild = env
+    vcog = bot.get_cog("Voyages")
+
+    async def no_event(*a, **kw):
+        return None
+    monkeypatch.setattr(vcog, "sync_event", no_event)
+    guild.members[2] = SimpleNamespace(id=2, display_name="Twiddles", roles=[])
+    guild.members[3] = SimpleNamespace(id=3, display_name="Newbie", roles=[Role(50, "Pending")])
+    await bot.db.update_settings(10, pending_role_id=50)
+    later = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0).isoformat()
+    plan = {"member_id": 2, "title": "Fort Night", "starts_at": later, "game_key": "sot", "size_label": "Sloop",
+            "reminders": "1h", "repeat": "none", "ping_role": "off", "duration_min": 90}
+    res = await run(cog, guild, ("voyages", "voyage.create", plan))
+    assert res[0][1] == "failed" and "no voyage channel" in res[0][2]          # nowhere to post it yet
+    await bot.db.update_settings(10, voyage_channel_id=21, crew_channel_id=20)
+    res = await run(cog, guild, ("voyages", "voyage.create", plan),
+                    ("voyages", "voyage.create", {**plan, "member_id": 3}),         # still on the Gangplank
+                    ("voyages", "voyage.create", {**plan, "member_id": 404}),       # left the server
+                    ("voyages", "voyage.create", {k: v for k, v in plan.items() if k != "member_id"}),
+                    ("voyages", "voyage.create", {**plan, "size_label": "Rowboat"}))
+    assert [r[1] for r in res] == ["applied", "failed", "failed", "failed", "failed"], res
+    assert "Gangplank" in res[1][2] and "Sloop" in res[4][2]
+    v = (await bot.db.voyages_with_status("scheduled", guild_id=10))[0]
+    assert (v.organizer_id, v.capacity, v.channel_id, v.reminders) == (2, 2, 21, "60")
+    assert (await bot.db.rsvps(v.id)).aboard == [2]
+    snap = (await cog.snap_voyages(guild))[0]
+    assert snap["rsvps"] == {"2": "aboard"}
+    # answers: Boxer takes the last seat, then only the organizer can change or cancel it
+    res = await run(cog, guild, ("voyages", "voyage.rsvp", {"id": v.id, "member_id": 1, "status": "aboard"}),
+                    ("voyages", "voyage.rsvp", {"id": v.id, "member_id": 1, "status": "aboard"}),
+                    ("voyages", "voyage.rsvp", {"id": v.id, "member_id": 1, "status": "sideways"}),
+                    ("voyages", "voyage.update", {"id": v.id, "member_id": 1, "title": "Mine now"}),
+                    ("voyages", "voyage.update", {"id": v.id, "member_id": 2, "title": "Fort Night!"}),
+                    ("voyages", "voyage.cancel", {"id": v.id, "member_id": 1}))
+    assert [r[1] for r in res] == ["applied", "applied", "failed", "failed", "applied", "failed"], res
+    assert (await bot.db.rsvps(v.id)).aboard == [2, 1] and (await bot.db.get_voyage(v.id)).title == "Fort Night!"
+    res = await run(cog, guild, ("voyages", "voyage.rsvp", {"id": v.id, "member_id": 1, "status": "clear"}))
+    assert res[0][1] == "applied" and (await bot.db.rsvps(v.id)).aboard == [2]
+
+    # a crew call
+    call = {"member_id": 2, "game_key": "sot", "size_label": "Brigantine", "activity": "", "note": "Chill run",
+            "title": "", "notify": False}
+    res = await run(cog, guild, ("crews", "crew.create", call), ("crews", "crew.create", call),
+                    ("crews", "crew.create", {**call, "member_id": 1, "game_key": "event"}))
+    assert [r[1] for r in res] == ["applied", "failed", "failed"], res
+    assert "already captaining" in res[1][2]
+    crew = (await bot.db.active_crews(10))[0]
+    assert (crew.captain_id, crew.capacity, crew.note, crew.channel_id) == (2, 3, "Chill run", 20)
+    res = await run(cog, guild, ("crews", "crew.join", {"id": crew.id, "member_id": 1}),
+                    ("crews", "crew.join", {"id": crew.id, "member_id": 1}),
+                    ("crews", "crew.rename", {"id": crew.id, "member_id": 1, "title": "Hijacked"}),
+                    ("crews", "crew.leave", {"id": crew.id, "member_id": 2}),
+                    ("crews", "crew.leave", {"id": crew.id, "member_id": 1}))
+    assert [r[1] for r in res] == ["applied", "failed", "failed", "failed", "applied"], res
+    assert (await cog.snap_crews(guild))[0]["member_ids"] == ["2"]
+    # a ship that isn't yours can't sail
+    ship = await bot.db.create_ship(guild_id=10, owner_id=1, name="Depth Charge", kind="Sloop", motto=None,
+                                    image=None, created_at=iso(datetime.now(timezone.utc)))
+    res = await run(cog, guild, ("crews", "crew.close", {"id": crew.id, "member_id": 2}))
+    assert res[0][1] == "applied"
+    res = await run(cog, guild, ("crews", "crew.create", {**call, "ship_id": ship.id}))
+    assert res[0][1] == "failed" and "ship of your own" in res[0][2]
+    games_sent = {g["key"]: g for g in (await cog.snap_guild(guild))["games"]}
+    assert [z["label"] for z in games_sent["sot"]["sizes"]] == ["Sloop", "Brigantine", "Galleon"]
+    assert games_sent["hangout"]["open_ended"] and not games_sent["event"]["crew_call"]
+
+
 # ------------------------------------------------------------ Manage buttons
 async def test_manage_buttons_only_once_connected(env):
     from plunderbot.cogs.voyages import voyage_view

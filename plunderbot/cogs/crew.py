@@ -136,48 +136,66 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
                 await self._say(interaction, voice.say("image_bad"))
                 return
 
+        started = voice.say("hangout_started" if profile.open_ended else "crew_started")
+        crew, problem = await self.open_call(
+            interaction.guild, channel, interaction.user.id, profile, crew_size, tag, note, clean_title(name),
+            image_name, notify, sailing_ship.id if sailing_ship is not None else None,
+            before_post=lambda: self._say(interaction, started))
+        if problem == "crew_one_at_a_time":
+            await self._say(interaction, voice.say(problem))
+            return
+        if problem:
+            await interaction.followup.send(voice.say(problem), ephemeral=True)
+            return
+        if channel.id != getattr(interaction.channel, "id", None) and crew.message_id:
+            link = f"https://discord.com/channels/{crew.guild_id}/{crew.channel_id}/{crew.message_id}"
+            try:
+                await interaction.followup.send(voice.say("crew_posted_there", link=link), ephemeral=True)
+            except discord.HTTPException:
+                pass
+        if profile.open_ended or crew.full:  # a hangout opens its voice channel straight away
+            await self.sail(interaction.guild, crew.id)
+
+    async def open_call(self, guild: discord.Guild, channel, captain_id: int, profile, crew_size, tag: str | None,
+                        note: str | None, title: str | None, image: str | None, notify: bool, ship_id: int | None,
+                        before_post=None):
+        """Save a crew call and post its card. (the crew, None) or (None or the crew, a voice key saying
+        what went wrong). Used by /crew start and by the Daisho screens (1.2.0); the caller sails it."""
         async with self.lock:
-            if await self.bot.db.active_crew_led_by(interaction.guild_id, interaction.user.id):
-                await self._say(interaction, voice.say("crew_one_at_a_time"))
-                return
-            settings = await self.bot.db.get_settings(interaction.guild_id)
+            if await self.bot.db.active_crew_led_by(guild.id, captain_id):
+                return None, "crew_one_at_a_time"
+            settings = await self.bot.db.get_settings(guild.id)
             now = now_utc()
             crew = await self.bot.db.create_crew(
-                guild_id=interaction.guild_id, channel_id=channel.id, captain_id=interaction.user.id,
+                guild_id=guild.id, channel_id=channel.id, captain_id=captain_id,
                 game_key=profile.key, size_label=crew_size.label, capacity=crew_size.capacity,
-                activity=tag, note=note, created_at=iso(now), title=clean_title(name),
-                expires_at=iso(now + timedelta(minutes=settings.crew_expire_minutes)), image=image_name)
-            if sailing_ship is not None:
-                crew = await self.bot.db.update_crew(crew.id, ship_id=sailing_ship.id)
-        await self._say(interaction, voice.say("hangout_started" if profile.open_ended else "crew_started"))
+                activity=tag, note=note, created_at=iso(now), title=title,
+                expires_at=iso(now + timedelta(minutes=settings.crew_expire_minutes)), image=image)
+            if ship_id is not None:
+                crew = await self.bot.db.update_crew(crew.id, ship_id=ship_id)
+        if before_post is not None:
+            await before_post()
 
         key = "hangout_call" if profile.open_ended else "crew_call"
-        text = voice.say(key, captain=interaction.user.mention, game=profile.name, size=crew_size.label)
+        text = voice.say(key, captain=f"<@{captain_id}>", game=profile.name, size=crew_size.label)
         mentions = discord.AllowedMentions.none()
-        role_id = (await self.bot.db.game_ping_roles(interaction.guild_id)).get(profile.key) if notify else None
-        role = interaction.guild.get_role(role_id) if role_id else None
-        last = self.last_ping.get((interaction.guild_id, profile.key))
+        role_id = (await self.bot.db.game_ping_roles(guild.id)).get(profile.key) if notify else None
+        role = guild.get_role(role_id) if role_id else None
+        last = self.last_ping.get((guild.id, profile.key))
         if role is not None and (last is None or now - last >= PING_COOLDOWN):
-            self.last_ping[(interaction.guild_id, profile.key)] = now
+            self.last_ping[(guild.id, profile.key)] = now
             text += "\n" + voice.say("crew_ping", role=role.mention)
             mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role])
         try:
-            _, card_emoji = await self.emoji_for(interaction.guild_id, profile, crew.size_label)
+            _, card_emoji = await self.emoji_for(guild.id, profile, crew.size_label)
             message = await channel.send(text, embed=await self.card_embed(crew, profile, card_emoji), view=card_view(crew),
                                          allowed_mentions=mentions, **self.card_file(channel, crew.image))
         except discord.HTTPException as e:
             log.warning("Couldn't post the card for crew %s: %s", crew.id, e)
             await self.bot.db.update_crew(crew.id, status="closed", ended_at=iso(now_utc()))
-            await interaction.followup.send(voice.say("crew_cant_post"), ephemeral=True)
-            return
-        await self.bot.db.update_crew(crew.id, message_id=message.id)
-        if channel.id != getattr(interaction.channel, "id", None):
-            try:
-                await interaction.followup.send(voice.say("crew_posted_there", link=message.jump_url), ephemeral=True)
-            except discord.HTTPException:
-                pass
-        if profile.open_ended or crew.full:  # a hangout opens its voice channel straight away
-            await self.sail(interaction.guild, crew.id)
+            return crew, "crew_cant_post"
+        crew = await self.bot.db.update_crew(crew.id, message_id=message.id)
+        return crew, None
 
     async def pick_ship(self, interaction: discord.Interaction, profile, value: str | None):
         """The registered ship a Sea of Thieves crew sails: the one picked, or the captain's only ship.
@@ -337,26 +355,8 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             crew = await self.bot.db.get_crew(crew_id)
             if crew is None or not crew.active:
                 reply = voice.say("crew_over")
-            elif action == "join":
-                if user.id in crew.members:
-                    reply = voice.say("crew_already_aboard")
-                elif not await self.bot.db.add_crew_member(crew.id, user.id, iso(now_utc())):
-                    reply = voice.say("crew_full")
-                else:
-                    crew = await self.bot.db.get_crew(crew.id)
-                    if crew.status == "sailing" and crew.voice_channel_id:
-                        reply = voice.say("crew_joined_sailing", channel=f"<#{crew.voice_channel_id}>")
-                    else:
-                        reply = voice.say("crew_joined")
-                    follow_up = "sail" if crew.full and crew.status == "open" else "refresh"
-            elif action == "leave":
-                if user.id == crew.captain_id:
-                    reply = voice.say("crew_captain_leave")
-                elif not await self.bot.db.remove_crew_member(crew.id, user.id):
-                    reply = voice.say("crew_not_aboard")
-                else:
-                    crew = await self.bot.db.get_crew(crew.id)
-                    reply, follow_up = voice.say("crew_left"), "refresh"
+            elif action in ("join", "leave"):
+                crew, reply, follow_up = await self._join_leave(crew, user.id, action)
             elif action == "sail":
                 if user.id != crew.captain_id:
                     reply = voice.say("crew_captain_only")
@@ -383,6 +383,38 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             await self.end(interaction.guild, crew.id, "closed")
         elif follow_up == "refresh":
             await self.refresh_card(interaction.guild, crew)
+
+    async def _join_leave(self, crew: Crew, user_id: int, action: str):
+        """(the crew, reply, follow-up: "sail", "refresh" or None). Call with the lock held."""
+        if action == "join":
+            if user_id in crew.members:
+                return crew, voice.say("crew_already_aboard"), None
+            if not await self.bot.db.add_crew_member(crew.id, user_id, iso(now_utc())):
+                return crew, voice.say("crew_full"), None
+            crew = await self.bot.db.get_crew(crew.id)
+            if crew.status == "sailing" and crew.voice_channel_id:
+                reply = voice.say("crew_joined_sailing", channel=f"<#{crew.voice_channel_id}>")
+            else:
+                reply = voice.say("crew_joined")
+            return crew, reply, "sail" if crew.full and crew.status == "open" else "refresh"
+        if user_id == crew.captain_id:
+            return crew, voice.say("crew_captain_leave"), None
+        if not await self.bot.db.remove_crew_member(crew.id, user_id):
+            return crew, voice.say("crew_not_aboard"), None
+        return await self.bot.db.get_crew(crew.id), voice.say("crew_left"), "refresh"
+
+    async def join_leave_as(self, guild: discord.Guild, crew_id: int, user_id: int, action: str) -> tuple[bool, str]:
+        """Join or leave a crew from the Daisho screens (1.2.0). (whether it changed anything, the reply)"""
+        async with self.lock:
+            crew = await self.bot.db.get_crew(crew_id)
+            if crew is None or not crew.active:
+                return False, voice.say("crew_over")
+            crew, reply, follow_up = await self._join_leave(crew, user_id, action)
+        if follow_up == "sail":
+            await self.sail(guild, crew.id)
+        elif follow_up == "refresh":
+            await self.refresh_card(guild, crew)
+        return follow_up is not None, reply
 
     async def emoji_for(self, guild_id: int, profile, size_label: str) -> tuple[str, str]:
         """(channel emoji, card emoji) for this game and size on this server."""

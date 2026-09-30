@@ -32,7 +32,7 @@ from ..crew_logic import clean_title, iso, now_utc, voice_channel_name
 from ..discord_util import self_serve_problem
 from ..ledger_logic import KINDS
 from ..menu_logic import MAX_OPTIONS, button_text, is_emoji, slug
-from ..voyage_logic import ParseError, format_reminders, parse_reminders
+from ..voyage_logic import REPEATS, ParseError, format_reminders, parse_reminders
 
 log = logging.getLogger("plunderbot.daisho")
 
@@ -270,7 +270,10 @@ class Daisho(commands.Cog):
         emojis = [{"id": e.id, "name": e.name, "animated": e.animated} for e in guild.emojis]
         return {"id": str(guild.id), "name": guild.name, "timezone": s.timezone or self.bot.config.default_timezone,
                 "channels": chans, "roles": roles, "emojis": emojis,
-                "games": [{"key": g.key, "name": g.name} for g in games.GAMES],
+                # sizes and activities too (1.2.0), for planning voyages and calling crews on the screens
+                "games": [{"key": g.key, "name": g.name, "crew_call": g.crew_call, "open_ended": g.open_ended,
+                           "sizes": [{"label": z.label, "capacity": z.capacity} for z in g.sizes],
+                           "tags": list(g.tags)} for g in games.GAMES],
                 "version": self.bot.version}
 
     async def snap_menus(self, guild):
@@ -337,7 +340,11 @@ class Daisho(commands.Cog):
                         "organizer_id": v.organizer_id, "organizer": self.name_of(guild, v.organizer_id),
                         "channel_id": v.channel_id, "message_id": v.message_id,
                         "aboard": [self.name_of(guild, u) for u in r.aboard],
-                        "maybe": len(r.maybe), "waitlist": len(r.waitlist)})
+                        "maybe": len(r.maybe), "waitlist": len(r.waitlist),
+                        # each member's answer (1.2.0), so the screens can show people theirs
+                        "rsvps": {str(u): st for st, us in (("aboard", r.aboard), ("maybe", r.maybe),
+                                                           ("waitlist", r.waitlist), ("cant", r.cant))
+                                  for u in us}})
         return out
 
     async def snap_crews(self, guild):
@@ -355,6 +362,7 @@ class Daisho(commands.Cog):
                         "title": c.title, "status": c.status, "captain_id": c.captain_id,
                         "captain": self.name_of(guild, c.captain_id),
                         "members": [self.name_of(guild, u) for u in c.members], "capacity": c.capacity,
+                        "member_ids": [str(u) for u in c.members], "open_ended": bool(g and g.open_ended),
                         "ship": ship.name if ship else None, "created_at": c.created_at, "sailed_at": c.sailed_at,
                         "ended_at": c.ended_at, "channel_id": c.channel_id, "message_id": c.message_id,
                         "haul": {"gold": entry.gold, "doubloons": entry.doubloons} if entry else None})
@@ -772,11 +780,31 @@ class Daisho(commands.Cog):
         return f"Deleted {menu.title}. Nobody's roles were changed."
 
     # ------------------------------------------------------------ applying: voyages and crews
+    # ------------------------------------------------------------ members acting as themselves (1.2.0)
+    async def member_of(self, guild, p: dict):
+        """The member a change is made for, when Daisho sends one (a Swabbie planning their own voyage,
+        say). Daisho fills member_id in from their sign-in, never from a form. None when there isn't one."""
+        if "member_id" not in p:
+            return None
+        raw = p.get("member_id")
+        if isinstance(raw, bool) or not str(raw).isdigit():
+            raise ApplyError("That change arrived garbled; make it again.")
+        member = guild.get_member(int(raw))
+        if member is None:
+            raise ApplyError("You're not in the server any more.")
+        pending = (await self.bot.db.get_settings(guild.id)).pending_role_id
+        if pending and any(r.id == pending for r in getattr(member, "roles", [])):
+            raise ApplyError("You're still on the Gangplank; a Harbormaster needs to let you aboard first.")
+        return member
+
     async def apply_voyage_update(self, guild, p: dict) -> str:
         cog = self.bot.get_cog("Voyages")
         v = await self.bot.db.get_voyage(int(p.get("id") or 0))
         if cog is None or v is None or v.guild_id != guild.id:
             raise ApplyError("That voyage no longer exists.")
+        member = await self.member_of(guild, p)
+        if member is not None and member.id != v.organizer_id:
+            raise ApplyError("Only the voyage's organizer can change it.")
         changes: dict = {}
         if "title" in p:
             title = " ".join(str(p["title"] or "").split())[:80]
@@ -829,6 +857,9 @@ class Daisho(commands.Cog):
         v = await self.bot.db.get_voyage(int(p.get("id") or 0))
         if cog is None or v is None or v.guild_id != guild.id:
             raise ApplyError("That voyage no longer exists.")
+        member = await self.member_of(guild, p)
+        if member is not None and member.id != v.organizer_id:
+            raise ApplyError("Only the voyage's organizer can cancel it.")
         if not await cog.apply_cancel(guild, v.id, bool(p.get("whole_series"))):
             raise ApplyError("That voyage has already started or ended.")
         return f"Voyage {v.title} cancelled; everyone who'd signed up was told."
@@ -838,6 +869,9 @@ class Daisho(commands.Cog):
         crew = await self.bot.db.get_crew(int(p.get("id") or 0))
         if cog is None or crew is None or crew.guild_id != guild.id:
             raise ApplyError("That crew no longer exists.")
+        member = await self.member_of(guild, p)
+        if member is not None and member.id != crew.captain_id:
+            raise ApplyError("Only the captain can close the crew.")
         if not crew.active:
             return "That crew had already finished."
         await cog.end(guild, crew.id, "closed")
@@ -848,6 +882,9 @@ class Daisho(commands.Cog):
         crew = await self.bot.db.get_crew(int(p.get("id") or 0))
         if cog is None or crew is None or crew.guild_id != guild.id:
             raise ApplyError("That crew no longer exists.")
+        member = await self.member_of(guild, p)
+        if member is not None and member.id != crew.captain_id:
+            raise ApplyError("Only the captain can rename the crew.")
         if not crew.active:
             raise ApplyError("That crew has finished.")
         crew = await self.bot.db.update_crew(crew.id, title=clean_title(p.get("title")))
@@ -861,6 +898,144 @@ class Daisho(commands.Cog):
                                                              captain.display_name if captain else "Captain",
                                                              emoji, crew.title))
         return "Crew renamed."
+
+    async def _needs_member(self, guild, p: dict):
+        member = await self.member_of(guild, p)
+        if member is None:
+            raise ApplyError("That change arrived garbled; make it again.")
+        return member
+
+    async def apply_voyage_create(self, guild, p: dict) -> str:
+        """Plan a voyage for the member who asked on the screens, with the same checks as /voyage create."""
+        cog = self.bot.get_cog("Voyages")
+        if cog is None:
+            raise ApplyError("Voyages are switched off.")
+        member = await self._needs_member(guild, p)
+        title = " ".join(str(p.get("title") or "").split())[:80]
+        if not title:
+            raise ApplyError("A voyage needs a title.")
+        description = (str(p.get("description") or "").strip()[:1000]) or None
+        try:
+            starts = datetime.fromisoformat(str(p.get("starts_at")))
+        except ValueError:
+            raise ApplyError("That start time can't be read.")
+        if starts.tzinfo is None:
+            raise ApplyError("That start time has no time zone.")
+        now = now_utc()
+        if starts <= now + timedelta(minutes=1) or starts > now + timedelta(days=366):
+            raise ApplyError("Pick a time in the future, within a year.")
+        profile = games.get(p.get("game_key")) if p.get("game_key") else None
+        if p.get("game_key") and profile is None:
+            raise ApplyError("That game isn't one PlunderBot knows.")
+        capacity = p.get("capacity")
+        if capacity is not None and (isinstance(capacity, bool) or not isinstance(capacity, int) or not 1 <= capacity <= 99):
+            raise ApplyError("Seats must be between 1 and 99.")
+        size_label = None
+        if profile is not None:
+            chosen = profile.size(p.get("size_label"))
+            if chosen is None:
+                raise ApplyError(f"{profile.name} crews are {', '.join(z.label for z in profile.sizes)}.")
+            size_label = chosen.label
+            if capacity is None and not profile.open_ended:
+                capacity = chosen.capacity
+        duration = p.get("duration_min", 120)
+        if isinstance(duration, bool) or not isinstance(duration, int) or not 15 <= duration <= 720:
+            raise ApplyError("A voyage lasts between 15 minutes and 12 hours.")
+        try:
+            minutes = parse_reminders(str(p.get("reminders") or "") or None)
+        except ParseError as e:
+            raise ApplyError(str(e))
+        repeat = p.get("repeat") or "none"
+        if repeat not in REPEATS:
+            raise ApplyError("Pick how it repeats.")
+        ping = p.get("ping_role") or "posted"
+        if ping not in ("off", "posted", "reminders"):
+            raise ApplyError("Pick when the game's role is tagged.")
+        channel = cog.voyage_channel(guild, await self.bot.db.get_settings(guild.id))
+        if channel is None:
+            raise ApplyError("PlunderBot has no voyage channel to post in. A Quartermaster can set one with "
+                             "/admin voyages channel (or on the Settings screen).")
+        perms = channel.permissions_for(guild.me)
+        if not (perms.view_channel and perms.send_messages and perms.embed_links):
+            raise ApplyError(f"PlunderBot can't post in #{channel.name}.")
+        v = await cog.launch(guild, channel, member.id, title=title, description=description, profile=profile,
+                             size_label=size_label, capacity=capacity, starts=starts, duration=duration,
+                             minutes=minutes, repeat=repeat, ping_role=ping)
+        if v is None:
+            raise ApplyError(f"PlunderBot couldn't post the voyage card in #{channel.name}.")
+        self.mark("voyages")
+        return f"Voyage {title} is on the charts in #{channel.name}, with you Aboard."
+
+    async def apply_voyage_rsvp(self, guild, p: dict) -> str:
+        cog = self.bot.get_cog("Voyages")
+        v = await self.bot.db.get_voyage(int(p.get("id") or 0))
+        if cog is None or v is None or v.guild_id != guild.id:
+            raise ApplyError("That voyage no longer exists.")
+        member = await self._needs_member(guild, p)
+        status = p.get("status")
+        if status not in ("aboard", "maybe", "cant", "clear"):
+            raise ApplyError("Pick Aboard, Maybe or Can't make it.")
+        ok, reply = await cog.rsvp_as(guild, v.id, member.id, None if status == "clear" else status)
+        if not ok:
+            raise ApplyError("That voyage has already started or ended.")
+        self.mark("voyages")
+        return reply
+
+    async def apply_crew_create(self, guild, p: dict) -> str:
+        """Call a crew for the member who asked on the screens, with the same checks as /crew start."""
+        cog = self.bot.get_cog("CrewCall")
+        if cog is None:
+            raise ApplyError("Crew calls are switched off.")
+        member = await self._needs_member(guild, p)
+        profile = games.get(p.get("game_key"))
+        if profile is None or not profile.crew_call:
+            raise ApplyError("Pick a game to call a crew for.")
+        ship = None
+        if p.get("ship_id") is not None:
+            ship = await self.bot.db.get_ship(int(p.get("ship_id") or 0))
+            if profile.key != "sot" or ship is None or ship.guild_id != guild.id or ship.retired \
+                    or ship.owner_id != member.id:
+                raise ApplyError("You can only sail a ship of your own that's still in service.")
+        crew_size = profile.size(p.get("size_label") or (ship.kind if ship else None))
+        if crew_size is None:
+            raise ApplyError(f"{profile.name} crews are {', '.join(z.label for z in profile.sizes)}.")
+        tag = profile.tag(p.get("activity"))
+        if p.get("activity") and tag is None:
+            raise ApplyError(f"{profile.name} activities are {', '.join(profile.tags)}.")
+        note = (" ".join(str(p.get("note") or "").split())[:200]) or None
+        channel = cog.crew_channel(guild, await self.bot.db.get_settings(guild.id))
+        if channel is None:
+            raise ApplyError("PlunderBot has no crew channel to post in. A Quartermaster can set one with "
+                             "/admin crew channel (or on the Settings screen).")
+        perms = channel.permissions_for(guild.me)
+        if not (perms.view_channel and perms.send_messages and perms.embed_links):
+            raise ApplyError(f"PlunderBot can't post in #{channel.name}.")
+        crew, problem = await cog.open_call(guild, channel, member.id, profile, crew_size, tag, note,
+                                            clean_title(p.get("title")), None, p.get("notify", True) is not False,
+                                            ship.id if ship else None)
+        if problem == "crew_one_at_a_time":
+            raise ApplyError("You're already captaining a crew. Close it first.")
+        if problem:
+            raise ApplyError(f"PlunderBot couldn't post the crew card in #{channel.name}.")
+        if profile.open_ended or crew.full:
+            await cog.sail(guild, crew.id)
+        self.mark("crews")
+        return f"Crew call for {profile.name} ({crew_size.label}) is up in #{channel.name}. Hop in voice when it sails!"
+
+    async def apply_crew_join(self, guild, p: dict, action: str = "join") -> str:
+        cog = self.bot.get_cog("CrewCall")
+        crew = await self.bot.db.get_crew(int(p.get("id") or 0))
+        if cog is None or crew is None or crew.guild_id != guild.id:
+            raise ApplyError("That crew no longer exists.")
+        member = await self._needs_member(guild, p)
+        changed, reply = await cog.join_leave_as(guild, crew.id, member.id, action)
+        if not changed:
+            raise ApplyError(reply)
+        self.mark("crews")
+        return reply
+
+    async def apply_crew_leave(self, guild, p: dict) -> str:
+        return await self.apply_crew_join(guild, p, "leave")
 
     # ------------------------------------------------------------ applying: the Ship's Ledger
     async def apply_ship_update(self, guild, p: dict) -> str:
@@ -912,6 +1087,11 @@ HANDLERS = {
     "voyage.cancel": Daisho.apply_voyage_cancel,
     "crew.close": Daisho.apply_crew_close,
     "crew.rename": Daisho.apply_crew_rename,
+    "voyage.create": Daisho.apply_voyage_create,
+    "voyage.rsvp": Daisho.apply_voyage_rsvp,
+    "crew.create": Daisho.apply_crew_create,
+    "crew.join": Daisho.apply_crew_join,
+    "crew.leave": Daisho.apply_crew_leave,
     "ship.update": Daisho.apply_ship_update,
     "log.remove": Daisho.apply_log_remove,
     "menu.save": Daisho.apply_menu_save,

@@ -289,25 +289,44 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 log.warning("Voyage picture refused: %r", e)
                 await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
                 return
-        v = await self.bot.db.create_voyage(
-            guild_id=guild.id, channel_id=channel.id, organizer_id=interaction.user.id, title=title.strip(),
-            description=description, game_key=profile.key if profile else None, size_label=size_label,
-            capacity=capacity, starts_at=iso(starts), duration_min=duration,
-            reminders=",".join(str(m) for m in minutes), repeat=repeat.value if repeat else "none",
-            created_at=iso(now), image=image_name, ping_role=notify.value if notify else "posted")
-        v = await self.bot.db.update_voyage(v.id, series_id=v.id)
-        await self.bot.db.set_rsvp(v.id, interaction.user.id, "aboard", iso(now))
-        try:
-            v = await self.post(guild, v)
-        except discord.HTTPException as e:
-            log.warning("Couldn't post voyage %s: %s", v.id, e)
-            await self.bot.db.update_voyage(v.id, status="cancelled")
+        v = await self.launch(guild, channel, interaction.user.id, title=title.strip(), description=description,
+                              profile=profile, size_label=size_label, capacity=capacity, starts=starts,
+                              duration=duration, minutes=minutes, repeat=repeat.value if repeat else "none",
+                              ping_role=notify.value if notify else "posted", image=image_name)
+        if v is None:
             await interaction.followup.send(voice.say("crew_cant_post"), ephemeral=True)
             return
         await interaction.followup.send(
             voice.say("voyage_created", link=_link(v), reminders=format_reminders(minutes),
                       when=f"<t:{int(starts.timestamp())}:F>")
             + "\n" + self.zone_note(tz, whose, starts), ephemeral=True)
+
+    async def launch(self, guild: discord.Guild, channel, organizer_id: int, *, title: str,
+                     description: str | None, profile, size_label: str | None, capacity: int | None,
+                     starts: datetime, duration: int, minutes: list[int], repeat: str, ping_role: str,
+                     image: str | None = None) -> Voyage | None:
+        """Save a new voyage with its organizer Aboard and post its card. None if the card couldn't go up.
+        Used by /voyage create and by the Daisho screens (1.2.0)."""
+        now = now_utc()
+        v = await self.bot.db.create_voyage(
+            guild_id=guild.id, channel_id=channel.id, organizer_id=organizer_id, title=title,
+            description=description, game_key=profile.key if profile else None, size_label=size_label,
+            capacity=capacity, starts_at=iso(starts), duration_min=duration,
+            reminders=",".join(str(m) for m in minutes), repeat=repeat,
+            created_at=iso(now), image=image, ping_role=ping_role)
+        v = await self.bot.db.update_voyage(v.id, series_id=v.id)
+        await self.bot.db.set_rsvp(v.id, organizer_id, "aboard", iso(now))
+        try:
+            return await self.post(guild, v)
+        except (discord.HTTPException, LookupError) as e:
+            log.warning("Couldn't post voyage %s: %s", v.id, e)
+            await self.bot.db.update_voyage(v.id, status="cancelled")
+            return None
+
+    def voyage_channel(self, guild: discord.Guild, settings):
+        """Where voyage cards go when there's no channel to hand (/admin voyages channel)."""
+        channel = guild.get_channel(settings.voyage_channel_id) if settings.voyage_channel_id else None
+        return channel if isinstance(channel, discord.TextChannel) else None
 
     @staticmethod
     def zone_note(tz, whose: str, starts: datetime) -> str:
@@ -507,24 +526,8 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
 
     # ------------------------------------------------------------ RSVP buttons
     async def on_button(self, interaction: discord.Interaction, action: str, voyage_id: int) -> None:
-        user = interaction.user
-        promoted: list[int] = []
         async with self.lock:
-            v = await self.bot.db.get_voyage(voyage_id)
-            if v is None or v.status != "scheduled":
-                reply, v = voice.say("voyage_over"), None
-            else:
-                rsvps = await self.bot.db.rsvps(v.id)
-                current = rsvps.of(user.id)
-                if current == action or (action == "aboard" and current == "waitlist"):
-                    await self.bot.db.set_rsvp(v.id, user.id, None, iso(now_utc()))  # pressing again clears it
-                    reply = voice.say("voyage_removed")
-                else:
-                    landed = placement(action, rsvps, v.capacity)
-                    await self.bot.db.set_rsvp(v.id, user.id, landed, iso(now_utc()))
-                    reply = voice.say(f"voyage_{landed}", title=v.title)
-                if current == "aboard":
-                    promoted = await self._promote_waitlist(v)
+            reply, v, promoted = await self._rsvp(voyage_id, interaction.user.id, action, toggle=True)
         try:
             await interaction.response.send_message(reply, ephemeral=True)
         except discord.HTTPException as e:
@@ -532,6 +535,36 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         if v is not None:
             await self.refresh(interaction.guild, v)
             await self._announce_promotions(interaction.guild, v, promoted)
+
+    async def rsvp_as(self, guild: discord.Guild, voyage_id: int, user_id: int, action: str | None) -> tuple[bool, str]:
+        """Set a member's answer from the Daisho screens (1.2.0): aboard, maybe, cant, or None to clear it.
+        Unlike the buttons, the same answer twice leaves it as it is. (whether it worked, the reply)"""
+        async with self.lock:
+            reply, v, promoted = await self._rsvp(voyage_id, user_id, action, toggle=False)
+        if v is not None:
+            await self.refresh(guild, v)
+            await self._announce_promotions(guild, v, promoted)
+        return v is not None, reply
+
+    async def _rsvp(self, voyage_id: int, user_id: int, action: str | None, toggle: bool):
+        """(reply, the voyage or None if it's over, people promoted off the waitlist). Call with the lock held."""
+        v = await self.bot.db.get_voyage(voyage_id)
+        if v is None or v.status != "scheduled":
+            return voice.say("voyage_over"), None, []
+        rsvps = await self.bot.db.rsvps(v.id)
+        current = rsvps.of(user_id)
+        same = current == action or (action == "aboard" and current == "waitlist")
+        if action is None or (toggle and same):
+            await self.bot.db.set_rsvp(v.id, user_id, None, iso(now_utc()))  # pressing again clears it
+            reply = voice.say("voyage_removed")
+        elif same:
+            return voice.say(f"voyage_{current}", title=v.title), v, []
+        else:
+            landed = placement(action, rsvps, v.capacity)
+            await self.bot.db.set_rsvp(v.id, user_id, landed, iso(now_utc()))
+            reply = voice.say(f"voyage_{landed}", title=v.title)
+        promoted = await self._promote_waitlist(v) if current == "aboard" else []
+        return reply, v, promoted
 
     async def _promote_waitlist(self, v: Voyage) -> list[int]:
         """Move people off the waitlist while there are free seats. Call with the lock held."""

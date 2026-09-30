@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 (2026-09-30): Voyages and crews from the web
+
+Pairs with The Magical Samurai 1.15.0.
+
+- Members can plan voyages, call crews, answer Aboard/Maybe/Can't make it, and join or leave crews on Daisho's screens, and edit or cancel their own voyages and rename or close their own crews there. PlunderBot does it exactly as the slash commands and buttons would, with the same checks, and posts the cards in the voyage channel (`/admin voyages channel`) and crew channel (`/admin crew channel`); without those set, the screens are told so.
+- Changes made as a member carry their Discord account (set by Daisho from their sign-in). PlunderBot refuses them if the member has left the server or is still Pending, and only lets an organizer or captain change their own voyage or crew.
+- Daisho is sent each game's crew sizes and activities, each voyage's answers and each crew's members, so its screens can show people where they stand.
+- Under the hood: creating a voyage, answering one, calling a crew and joining one now share their code between Discord and Daisho (no change in how the commands and buttons behave).
+
 ## 1.1.3 (2026-09-30): Game Index threads
 
 - The Game Index links each game's forum thread by its address ("💬 thread") instead of mentioning it. Discord shows a mention of a thread that has gone quiet (archived after a week without posts) as "#unknown" to anyone who hasn't opened it, so most quieter games showed "#unknown". Run `/noticeboard gameindex` (or Post it on Daisho) after the refit to rebuild it.
