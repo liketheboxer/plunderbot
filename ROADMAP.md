@@ -6,7 +6,7 @@
 | 2 | Crew Call | Done (0.2.x) |
 | 3 | Voyages, member time zones, region roles → time zones | Done (0.3.x) |
 | 4 | Gangplank (airlock onboarding), pictures and role tags on cards, Colours (role menus), Notice Board pages (rules, Pirate's Guide, Game Index), follow a game | Done (0.4.0 to 0.5.0) |
-| 5 | Ship's Log weekly digest, Crow's Nest game news | |
+| 5 | Ship's Log weekly digest, Crow's Nest game news | Done (0.6.0) |
 | 6 | Parley: AI chat (Claude Haiku 4.5 + Kagi FastGPT, $5/month, 20 replies per member per day) | |
 | 7 | Ship's Ledger: ships, voyages, Captain's Log screenshot reading, ship and pirate profiles, screenshot reminders at sail and at the end | |
 | 8 | Articles: if/else rules and MEE6's automations (then MEE6 can go) | |

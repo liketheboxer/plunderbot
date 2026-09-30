@@ -317,6 +317,19 @@ LINES: dict[str, list[str]] = {
     "follow_done": [
         "Crow's nest updated! {changes}",
     ],
+    "shipslog_intro": [
+        "Ahoy, Fortress! Your butler has polished the log book. Here's the week that was, and the week to come.",
+        "Another week on the high seas! I've tallied the crews, counted the cake and charted what's next.",
+        "Gather round the grog barrel! Here's what the Fortress got up to this week.",
+    ],
+    "shipslog_quiet": [
+        "A calm week on the water: no crews, voyages or birthdays to report. Perfect weather for planning "
+        "the next one! Try `/voyage create`.",
+    ],
+    "crowsnest_post": [
+        "Land ho! Fresh news for {game}:",
+        "From the crow's nest: news about {game}!",
+    ],
     "guild_only": [
         "{cuss} That order only works aboard the ship, not in private messages.",
     ],

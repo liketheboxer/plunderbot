@@ -239,6 +239,38 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE page_sections ADD COLUMN image_style TEXT NOT NULL DEFAULT 'inside';
     """,
+    # 14: the Ship's Log (weekly digest) and the Crow's Nest (game news)
+    """
+    ALTER TABLE guild_settings ADD COLUMN shipslog_channel_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN shipslog_weekday INTEGER NOT NULL DEFAULT 6;
+    ALTER TABLE guild_settings ADD COLUMN shipslog_hour INTEGER NOT NULL DEFAULT 18;
+    ALTER TABLE guild_settings ADD COLUMN shipslog_last TEXT;
+    ALTER TABLE guild_settings ADD COLUMN crowsnest_enabled INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE thread_activity (
+        guild_id   INTEGER NOT NULL,
+        day        TEXT NOT NULL,
+        channel_id INTEGER NOT NULL,
+        messages   INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, day, channel_id)
+    );
+    CREATE TABLE news_sources (
+        guild_id INTEGER NOT NULL,
+        game_key TEXT NOT NULL,
+        kind     TEXT NOT NULL,
+        value    TEXT,
+        PRIMARY KEY (guild_id, game_key)
+    );
+    CREATE TABLE news_seen (
+        guild_id  INTEGER NOT NULL,
+        game_key  TEXT NOT NULL,
+        item_id   TEXT NOT NULL,
+        seen_at   TEXT NOT NULL,
+        posted    INTEGER NOT NULL DEFAULT 0,
+        title     TEXT,
+        url       TEXT,
+        PRIMARY KEY (guild_id, game_key, item_id)
+    );
+    """,
 ]
 
 
@@ -267,6 +299,11 @@ class GuildSettings:
     gangplank_remind_days: int = 3
     gangplank_kick_days: int = 7
     forum_channel_id: int | None = None
+    shipslog_channel_id: int | None = None
+    shipslog_weekday: int = 6  # Monday is 0
+    shipslog_hour: int = 18
+    shipslog_last: str | None = None
+    crowsnest_enabled: int = 0
 
 
 @dataclass
@@ -332,7 +369,8 @@ class Boarding:
     reminded_at: str | None = None
 
 
-_SETTING_COLUMNS = {"forum_channel_id", "gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
+_SETTING_COLUMNS = {"shipslog_channel_id", "shipslog_weekday", "shipslog_hour", "shipslog_last",
+                    "crowsnest_enabled", "forum_channel_id", "gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
                     "rules_channel_id", "orientation_channel_id", "gangplank_alert_channel_id",
                     "approve_emoji", "reject_emoji", "gangplank_remind_days", "gangplank_kick_days",
                     "timezone", "birthday_channel_id", "birthday_hour", "birthday_role_id",
@@ -952,3 +990,69 @@ class Database:
         for i, r in enumerate(rows, start=1):
             await self.conn.execute("UPDATE page_sections SET position = ? WHERE id = ?", (i, r["id"]))
         await self.conn.commit()
+
+    # ------------------------------------------------------------ Ship's Log
+    async def count_thread_message(self, guild_id: int, day: str, channel_id: int) -> None:
+        await self.conn.execute(
+            "INSERT INTO thread_activity (guild_id, day, channel_id, messages) VALUES (?, ?, ?, 1) "
+            "ON CONFLICT (guild_id, day, channel_id) DO UPDATE SET messages = messages + 1",
+            (guild_id, day, channel_id))
+        await self.conn.commit()
+
+    async def thread_activity(self, guild_id: int, first_day: str, last_day: str) -> dict[int, int]:
+        """Messages per thread between two days (inclusive, YYYY-MM-DD in UTC)."""
+        rows = await (await self.conn.execute(
+            "SELECT channel_id, SUM(messages) AS n FROM thread_activity WHERE guild_id = ? AND day >= ? "
+            "AND day <= ? GROUP BY channel_id", (guild_id, first_day, last_day))).fetchall()
+        return {r["channel_id"]: r["n"] for r in rows}
+
+    async def prune_thread_activity(self, before_day: str) -> None:
+        await self.conn.execute("DELETE FROM thread_activity WHERE day < ?", (before_day,))
+        await self.conn.commit()
+
+    async def crews_sailed_between(self, guild_id: int, start: str, end: str) -> list[Crew]:
+        rows = await (await self.conn.execute(
+            "SELECT id FROM crews WHERE guild_id = ? AND sailed_at IS NOT NULL AND sailed_at >= ? AND sailed_at < ? "
+            "ORDER BY sailed_at", (guild_id, start, end))).fetchall()
+        return [await self.get_crew(r["id"]) for r in rows]
+
+    async def voyages_starting_between(self, guild_id: int, start: str, end: str) -> list["Voyage"]:
+        rows = await (await self.conn.execute(
+            "SELECT * FROM voyages WHERE guild_id = ? AND starts_at >= ? AND starts_at < ? AND status != 'cancelled' "
+            "ORDER BY starts_at", (guild_id, start, end))).fetchall()
+        return [Voyage(**{k: r[k] for k in r.keys()}) for r in rows]
+
+    # ------------------------------------------------------------ Crow's Nest
+    async def news_sources(self, guild_id: int) -> dict[str, tuple[str, str | None]]:
+        rows = await (await self.conn.execute(
+            "SELECT game_key, kind, value FROM news_sources WHERE guild_id = ?", (guild_id,))).fetchall()
+        return {r["game_key"]: (r["kind"], r["value"]) for r in rows}
+
+    async def set_news_source(self, guild_id: int, game_key: str, kind: str | None, value: str | None) -> None:
+        if kind is None:
+            await self.conn.execute("DELETE FROM news_sources WHERE guild_id = ? AND game_key = ?", (guild_id, game_key))
+        else:
+            await self.conn.execute(
+                "INSERT INTO news_sources (guild_id, game_key, kind, value) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT (guild_id, game_key) DO UPDATE SET kind = excluded.kind, value = excluded.value",
+                (guild_id, game_key, kind, value))
+        await self.conn.commit()
+
+    async def news_seen_ids(self, guild_id: int, game_key: str) -> set[str]:
+        rows = await (await self.conn.execute(
+            "SELECT item_id FROM news_seen WHERE guild_id = ? AND game_key = ?", (guild_id, game_key))).fetchall()
+        return {r["item_id"] for r in rows}
+
+    async def mark_news_seen(self, guild_id: int, game_key: str, item_id: str, seen_at: str, posted: bool,
+                             title: str | None = None, url: str | None = None) -> None:
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO news_seen (guild_id, game_key, item_id, seen_at, posted, title, url) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)", (guild_id, game_key, item_id, seen_at, int(posted), title, url))
+        await self.conn.commit()
+
+    async def news_posted_between(self, guild_id: int, start: str, end: str) -> list[tuple[str, str, str]]:
+        """(game_key, title, url) of news posted in a window, oldest first."""
+        rows = await (await self.conn.execute(
+            "SELECT game_key, title, url FROM news_seen WHERE guild_id = ? AND posted = 1 AND seen_at >= ? "
+            "AND seen_at < ? ORDER BY seen_at", (guild_id, start, end))).fetchall()
+        return [(r["game_key"], r["title"], r["url"]) for r in rows]

@@ -23,6 +23,8 @@ COGS = [
     "plunderbot.cogs.gangplank",
     "plunderbot.cogs.colours",
     "plunderbot.cogs.noticeboard",
+    "plunderbot.cogs.shipslog",
+    "plunderbot.cogs.crowsnest",
 ]
 
 

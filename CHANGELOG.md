@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 (2026-09-29): The Ship's Log and the Crow's Nest
+
+Phase 5.
+
+- The Ship's Log: a weekly roundup (Sunday 6 PM server time by default) of crews that set sail and the busiest games and captain, voyages sailed and coming up, birthdays in the week ahead, new pirates let aboard, the liveliest game threads, and the week's game news. `/admin shipslog channel|when|preview|post`.
+- The Crow's Nest: official news and patch notes for each game, posted in its thread in the game forum, checked every 30 minutes. Steam games work out of the box; Fortnite and League of Legends need a feed (`/admin crowsnest source`). Turning it on only notes what's already out, so old posts don't flood the threads. `/admin crowsnest on|off|check|source|preview`.
+- Messages in game threads are counted per day (just the count, never the text) for the roundup, and kept 60 days.
+
 ## 0.5.5 (2026-09-29): Faster pickers
 
 - Follow games and role-menu pickers answer Discord straight away, so picking many at once no longer times out ("PlunderBot didn't respond in time"). Joining and leaving game threads happens just after the reply.

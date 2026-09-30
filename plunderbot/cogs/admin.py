@@ -6,6 +6,7 @@ Replies here are plain English on purpose: they're settings, not banter.
 """
 from __future__ import annotations
 
+import re
 from zoneinfo import available_timezones
 
 import discord
@@ -15,6 +16,7 @@ from discord.ext import commands
 from .. import crew_emoji, games
 from ..gangplank_logic import emoji_key, APPROVE_DEFAULT, REJECT_DEFAULT, deadline
 from ..region_logic import guess_zone
+from ..shipslog_logic import WEEKDAYS
 from ..voyage_logic import zone_from_name
 from ..crew_logic import voice_channel_name
 from ..birthday_logic import valid_timezone
@@ -40,6 +42,8 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
     voyages = app_commands.Group(name="voyages", description="Voyage settings")
     regions = app_commands.Group(name="regions", description="Region roles that set members' time zones")
     gangplank = app_commands.Group(name="gangplank", description="Gangplank: the airlock in #introductions")
+    shipslog = app_commands.Group(name="shipslog", description="The Ship's Log weekly roundup")
+    crowsnest = app_commands.Group(name="crowsnest", description="The Crow's Nest: game news in each game's thread")
 
     def __init__(self, bot):
         self.bot = bot
@@ -593,6 +597,132 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
             lines.append("Nobody is waiting.")
         await interaction.response.send_message("\n".join(lines)[:1990], ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
+
+    # ------------------------------------------------------------ Ship's Log
+    @shipslog.command(name="channel", description="Where the weekly roundup posts (leave empty to turn it off)")
+    async def shipslog_channel(self, interaction: discord.Interaction,
+                               channel: discord.TextChannel | None = None) -> None:
+        if channel is not None:
+            perms = channel.permissions_for(interaction.guild.me)
+            if not (perms.view_channel and perms.send_messages and perms.embed_links):
+                await interaction.response.send_message(
+                    f"I need View Channel, Send Messages and Embed Links in {channel.mention}.", ephemeral=True)
+                return
+        s = await self.bot.db.update_settings(interaction.guild_id,
+                                              shipslog_channel_id=channel.id if channel else None)
+        if channel is None:
+            await interaction.response.send_message("The Ship's Log is off.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"The Ship's Log will post in {channel.mention} every {WEEKDAYS[s.shipslog_weekday]} at "
+            f"{_hour_label(s.shipslog_hour)} {s.timezone or self.bot.config.default_timezone}. "
+            "Change that with /admin shipslog when; see it now with /admin shipslog preview.", ephemeral=True)
+
+    @shipslog.command(name="when", description="Which day and hour the roundup posts (server time)")
+    @app_commands.describe(hour="0 to 23; 18 means 6:00 PM")
+    @app_commands.choices(day=[app_commands.Choice(name=d, value=i) for i, d in enumerate(WEEKDAYS)])
+    async def shipslog_when(self, interaction: discord.Interaction, day: app_commands.Choice[int],
+                            hour: app_commands.Range[int, 0, 23]) -> None:
+        s = await self.bot.db.update_settings(interaction.guild_id, shipslog_weekday=day.value, shipslog_hour=hour)
+        await interaction.response.send_message(
+            f"The Ship's Log will post every {day.name} at {_hour_label(hour)} "
+            f"{s.timezone or self.bot.config.default_timezone}.", ephemeral=True)
+
+    @shipslog.command(name="preview", description="See this week's roundup privately")
+    async def shipslog_preview(self, interaction: discord.Interaction) -> None:
+        cog = self.bot.get_cog("ShipsLog")
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(embed=await cog.build(interaction.guild), ephemeral=True)
+
+    @shipslog.command(name="post", description="Post this week's roundup now")
+    async def shipslog_post(self, interaction: discord.Interaction) -> None:
+        s = await self.bot.db.get_settings(interaction.guild_id)
+        if not s.shipslog_channel_id:
+            await interaction.response.send_message("Set a channel first with /admin shipslog channel.",
+                                                    ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        msg = await self.bot.get_cog("ShipsLog").post(interaction.guild)
+        await interaction.followup.send(f"Posted: {msg.jump_url}" if msg else "Its channel is gone.",
+                                        ephemeral=True)
+
+    # ------------------------------------------------------------ Crow's Nest
+    @crowsnest.command(name="on", description="Start posting game news in each game's forum thread")
+    async def crowsnest_on(self, interaction: discord.Interaction) -> None:
+        s = await self.bot.db.get_settings(interaction.guild_id)
+        if not s.forum_channel_id:
+            await interaction.response.send_message(
+                "Tell me the game forum first: /noticeboard gameindex forum:#game-discussion.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self.bot.db.update_settings(interaction.guild_id, crowsnest_enabled=1)
+        notes = await self.bot.get_cog("CrowsNest").check(interaction.guild)
+        await interaction.followup.send(
+            "The Crow's Nest is on. I check for news every 30 minutes; what's already out was noted, not "
+            "posted.\n" + self._news_notes(notes), ephemeral=True)
+
+    @crowsnest.command(name="off", description="Stop posting game news")
+    async def crowsnest_off(self, interaction: discord.Interaction) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, crowsnest_enabled=0)
+        await interaction.response.send_message("The Crow's Nest is off.", ephemeral=True)
+
+    @crowsnest.command(name="check", description="Look for game news now, and show each game's status")
+    async def crowsnest_check(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        notes = await self.bot.get_cog("CrowsNest").check(interaction.guild)
+        await interaction.followup.send(self._news_notes(notes), ephemeral=True)
+
+    @staticmethod
+    def _news_notes(notes: dict[str, str]) -> str:
+        lines = [f"**{games.get(k).name if games.get(k) else k}**: {v}" for k, v in notes.items()]
+        return ("\n".join(lines) or "No games to watch.")[:1990]
+
+    @crowsnest.command(name="source", description="Where a game's news comes from")
+    @app_commands.describe(game="Which game", kind="Steam app, RSS/Atom feed, or no news",
+                           value="The Steam app id (the number in its store link), or the feed's web address")
+    @app_commands.choices(game=[app_commands.Choice(name=g.name, value=g.key) for g in games.GAMES if g.crew_call],
+                          kind=[app_commands.Choice(name="Steam app", value="steam"),
+                                app_commands.Choice(name="RSS or Atom feed", value="feed"),
+                                app_commands.Choice(name="No news for this game", value="none"),
+                                app_commands.Choice(name="Back to the default", value="default")])
+    async def crowsnest_source(self, interaction: discord.Interaction, game: app_commands.Choice[str],
+                               kind: app_commands.Choice[str], value: str | None = None) -> None:
+        if kind.value == "steam":
+            m = re.search(r"(\d{3,10})", value or "")
+            if not m:
+                await interaction.response.send_message(
+                    "Give the Steam app id, e.g. 1172620, or paste the store link.", ephemeral=True)
+                return
+            value = m.group(1)
+        elif kind.value == "feed":
+            if not (value or "").startswith(("http://", "https://")):
+                await interaction.response.send_message("Give the feed's full web address.", ephemeral=True)
+                return
+        await self.bot.db.set_news_source(interaction.guild_id, game.value,
+                                          None if kind.value == "default" else kind.value,
+                                          value if kind.value in ("steam", "feed") else None)
+        text = {"steam": f"{game.name} news will come from Steam app {value}.",
+                "feed": f"{game.name} news will come from {value}.",
+                "none": f"No news will be posted for {game.name}.",
+                "default": f"{game.name} is back to its built-in news source."}[kind.value]
+        await interaction.response.send_message(text + " Try /admin crowsnest preview to see its latest post.",
+                                                ephemeral=True)
+
+    @crowsnest.command(name="preview", description="See a game's latest news post privately")
+    @app_commands.choices(game=[app_commands.Choice(name=g.name, value=g.key) for g in games.GAMES if g.crew_call])
+    async def crowsnest_preview(self, interaction: discord.Interaction, game: app_commands.Choice[str]) -> None:
+        await interaction.response.defer(ephemeral=True)
+        cog = self.bot.get_cog("CrowsNest")
+        try:
+            item = await cog.latest(interaction.guild, game.value)
+        except Exception as e:
+            await interaction.followup.send(f"I couldn't read {game.name}'s news: {e}", ephemeral=True)
+            return
+        if item is None:
+            await interaction.followup.send(f"{game.name} has no news source, or nothing posted yet.",
+                                            ephemeral=True)
+            return
+        await interaction.followup.send(embed=cog.embed(game.name, item), ephemeral=True)
 
 
 async def setup(bot) -> None:

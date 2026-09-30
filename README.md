@@ -28,6 +28,8 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/colours create` | Manage Roles | Role menus: `create`, `add` (role, emoji, label, description), `remove`, `move`, `edit`, `onboarding` (offer it to newcomers), `post`, `preview`, `import` (copy a MEE6 reaction-role message), `list`, `delete` |
 | `/noticeboard create` | Manage Server | Pages: `create`, `section add/edit/image/remove/move` (a pop-up form), `import` (copy an existing message, or a run of them with `through`, such as the welcome and rules), `starter` (a draft Pirate's Guide), `post`, `preview`, `gameindex`, `list`, `delete` |
 | `/admin gangplank setup` | Manage Server | Intro channel, Pending role, Harbormasters role, rules and orientation channels, optional alert channel. Then `on`/`off`, `emoji`, `timing`, `status` |
+| `/admin shipslog channel` | Manage Server | The weekly Ship's Log roundup: `channel` (empty turns it off), `when` (day and hour), `preview`, `post` |
+| `/admin crowsnest on` | Manage Server | Game news in each game's forum thread: `on`, `off`, `check`, `source` (Steam app, RSS/Atom feed, none or default), `preview` |
 | `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
 | `/admin birthdays hour` | Manage Server | Hour the toast goes out, 0 to 23 (default 9 = 9:00 AM) |
@@ -56,6 +58,11 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - A page is a list of sections; each is one embed with a heading, text (Markdown), colour and optional picture, either inside the section or as a banner above it. Write them in a pop-up form, or `/noticeboard import` existing messages (a picture on its own becomes a banner above the text after it).
 - `/noticeboard post` posts the page; posting again edits the same messages in place. Long pages spill over several messages.
 - `/noticeboard gameindex` posts the Game Index: every game with its forum thread and ping role, and a **Follow games** button. Run it again after adding threads or roles.
+
+### How the Ship's Log and Crow's Nest work
+
+- Every week (Sunday 6 PM server time by default) the Ship's Log posts a roundup: crews that sailed, voyages sailed and coming up, birthdays this week, new pirates, the liveliest game threads, and game news.
+- The Crow's Nest checks each game's official news every 30 minutes and posts anything new in its thread in the game forum. Steam games are built in; games not on Steam need an RSS or Atom feed. When it's turned on (or a game is first seen) it only notes what's already out, so old posts don't flood in. At most three new posts per game per check.
 
 ### How Gangplank works
 
