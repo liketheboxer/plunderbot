@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 (2026-09-30): Onboarding wording
+
+- The welcome-aboard message and the "which zone is closest?" prompt no longer say a region role makes PlunderBot show times in your zone (Discord timestamps already do that for everyone). They now say what it does: sets the zone PlunderBot reads the times you type in.
+- The welcome-aboard message with buttons no longer says the Pirate's Guide is in the orientation channel; it points there for the rest of the role menus.
+- `/noticeboard starter`'s draft Pirate's Guide: the roles section explains the role-menu buttons in #new-pirate-orientation and `/follow` (the guide itself has no role buttons), a new Ship's Ledger section, and "@mention me" instead of `/plunderbot` for asking PlunderBot things.
+
 ## 1.1.0 (2026-09-30): Role menus on Daisho
 
 Pairs with The Magical Samurai 1.14.0.

@@ -269,15 +269,15 @@ LINES: dict[str, list[str]] = {
     ],
     "gangplank_approved": [
         "Thanks for introducing yourself, {member}, and welcome aboard! Head over to {orientation} to pick "
-        "your roles, and grab a region role while you're there so every voyage time shows in your own time zone.",
+        "your roles, and grab a region role while you're there so I read the times you type in your own zone.",
         "{member} is aboard! Welcome to the Fortress! Swing by {orientation} to pick your roles, and don't "
-        "skip the region role: it's how I show you every time in your own time zone.",
+        "skip the region role: it tells me which time zone you mean when you type a time.",
     ],
     "gangplank_approved_buttons": [
-        "Thanks for introducing yourself, {member}, and welcome aboard! Pick your region and roles with the "
-        "buttons below (only you see your picks), and swing by {orientation} for the Pirate's Guide.",
-        "{member} is aboard! Welcome to the Fortress! Use the buttons below to pick your region, so every time "
-        "shows in your own time zone, plus your roles and games. The Pirate's Guide is in {orientation}.",
+        "Thanks for introducing yourself, {member}, and welcome aboard! Pick your region, roles and games with "
+        "the buttons below (only you see your picks), and swing by {orientation} for the rest of the role menus.",
+        "{member} is aboard! Welcome to the Fortress! Use the buttons below to pick your region (so I read the "
+        "times you type in your own zone), your roles and your games. There are more menus in {orientation}.",
     ],
     "gangplank_reminder": [
         "Ahoy, {member}! A friendly nudge from your butler: introduce yourself here and tell us your favorite "
@@ -307,8 +307,8 @@ LINES: dict[str, list[str]] = {
         "{cuss} I couldn't change your roles. A Quartermaster needs to move my role above these ones.",
     ],
     "colours_zone_prompt": [
-        "Your region covers a lot of ocean! Which of these is closest to you? It's how I show every time in "
-        "your own time zone.",
+        "Your region covers a lot of ocean! Which of these is closest to you? It's the zone I'll read the "
+        "times you type in.",
     ],
     "follow_prompt": [
         "Which games shall I keep you posted on? You'll get each game's ping role and I'll add you to its "

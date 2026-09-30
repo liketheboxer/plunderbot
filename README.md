@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.1.0 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho). The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.1.1 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho). The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -55,8 +55,8 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 ### How Colours (role menus) work
 
 - Each menu's card lists its roles with one button. Pressing it opens a private dropdown already ticked with the roles you wear; save it and you wear exactly those. Menus can be pick-one (regions) or pick-any.
-- Menus marked with `/colours onboarding` appear as buttons on the welcome-aboard message, alongside **Follow games**.
-- Picking a region too broad for one time zone (Asia, South America) asks which zone is closest.
+- Menus marked with `/colours onboarding` appear as buttons on the welcome-aboard message, alongside **Follow games**. Other menus live wherever they're posted (for Brimstone, #new-pirate-orientation), and the welcome-aboard message points there.
+- A region role sets the time zone PlunderBot reads your typed times in (see [How Voyages work](#how-voyages-work)). Picking a region too broad for one zone (Asia, South America) asks which zone is closest.
 - `/colours import` copies a MEE6 reaction-role message (emoji and roles) into a new menu; the old message is left alone until you delete it.
 - PlunderBot won't hand out roles with moderator permissions, or roles above its own.
 - Menus can also be built and edited on Daisho's **Role menus** screen (1.1.0), with a live preview of the card, how many members wear each role, a colour for the card and the button's own words and emoji. Only Daisho Commanders can edit them there.
@@ -77,11 +77,11 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 
 ### How the Daisho screens work
 
-- PlunderBot's module in The Magical Samurai (Daisho, `daisho.magicalsamurai.com`) has screens for its settings, articles, Notice Board pages, voyages, crews and the Ship's Ledger, for crew with access to the PlunderBot unit there. Its manual is in Daisho under **Manual › PlunderBot**.
+- PlunderBot's module in The Magical Samurai (Daisho, `daisho.magicalsamurai.com`) has screens for its settings, role menus, articles, Notice Board pages, voyages, crews and the Ship's Ledger, short link `plunderbot.magicalsamurai.com`. Crew with access to the PlunderBot unit see what their permission keys allow; with open sign-in on, any server member past the Gangplank can sign in as a **Swabbie** and see Voyages, Crews and the Ship's Ledger (read-only). The crew's manual is in Daisho under **Manual › PlunderBot**; Swabbies get their own **Swabbie's guide**.
 - PlunderBot keeps its own data and sends Daisho a copy: what changed every five minutes, everything every half hour. Changes made on the screens are picked up within about 15 seconds, applied with the same checks as the slash commands, and reported back (done, or refused and why). PlunderBot remembers which changes it has applied, so a restart never applies one twice, and skips anything garbled.
-- PlunderBot can't see who made a change on the screens: Daisho's permission keys decide that. Editing articles and Notice Board pages there is Commander-only by default, since in Discord they need Manage Server.
+- PlunderBot can't see who made a change on the screens: Daisho's permission keys decide that. Editing role menus, articles and Notice Board pages there is Commander-only by default, since in Discord they need Manage Roles or Manage Server.
 - To connect it: on the unit's page in Daisho, the Captain picks **PlunderBot** as its module and issues a module token with all three scopes, then refits. Exocomp hands over `SAMURAI_URL`, `SAMURAI_PUBLIC_URL` and `SAMURAI_MODULE_TOKEN`.
-- Once connected, voyage and crew cards get a **Manage** button that opens them in Daisho (it works for people with access to the unit there; anyone else is turned away).
+- Once connected, voyage and crew cards get a **Manage** button that opens them in Daisho (it works for crew with access to the unit there, and for Swabbies; anyone else is asked to sign in, and turned away if they can't).
 - If Daisho is down, PlunderBot carries on and catches up when it's back.
 
 ### How Articles work

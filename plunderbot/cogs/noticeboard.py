@@ -43,14 +43,18 @@ STARTER_GUIDE = [
      "a crew with its own voice channel. Anyone can plan one!"),
     ("Times in your own time zone",
      "Every time I show is in your own local time. When you type a time, I read it in your time zone: pick a "
-     "region role below, or set it exactly with `/timezone set`."),
+     "region role in #new-pirate-orientation, or set it exactly with `/timezone set`."),
     ("Pick your roles",
-     "Choose your region and the rest of your roles with the buttons below, and follow the games you play so you "
-     "hear when a crew is forming. You can change them whenever you like."),
+     "The role menus in #new-pirate-orientation each have one button: press it, tick the roles you want and "
+     "save. Follow the games you play with `/follow` so you hear when a crew is forming. You can change them "
+     "whenever you like."),
+    ("Your ship and the Ship's Ledger",
+     "Sail Sea of Thieves? `/ship register` your ship, and after a session log the haul with `/ship log` and a "
+     "screenshot of the Captain's Log. `/ship fleet` shows the richest ships and pirates."),
     ("Birthdays",
      "Tell me yours with `/birthday set` and the whole Fortress will raise a mug on the day."),
     ("Need a hand?",
-     "Ask a Harbormaster, or ask me with `/plunderbot`. Fair winds!"),
+     "Ask a Harbormaster, or @mention me and ask. Fair winds!"),
 ]
 
 
