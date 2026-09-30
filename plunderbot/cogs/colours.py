@@ -17,7 +17,8 @@ from discord.ext import commands
 from .. import voice
 from ..db import RoleMenu
 from ..discord_util import fetch_linked, self_serve_problem
-from ..menu_logic import MAX_OPTIONS, parse_import, partial_emoji, plan, render_menu, slug
+from ..menu_logic import (MAX_OPTIONS, first_emoji, infer_role, match_role_by_name, parse_lines,
+                          partial_emoji, plan, render_menu, slug)
 from ..region_logic import broad_zones_for
 
 log = logging.getLogger("plunderbot.colours")
@@ -371,14 +372,14 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
                                             "that channel.", ephemeral=True)
             return
         text = "\n".join([msg.content or ""] + [e.description or "" for e in msg.embeds]
-                         + [f.value for e in msg.embeds for f in e.fields])
-        pairs = parse_import(text)
-        if not pairs:
+                         + [f"{f.name}\n{f.value}" for e in msg.embeds for f in e.fields])
+        found = await self.resolve_import(guild, msg, text)
+        if not found:
             hidden = "" if getattr(self.bot, "can_read_messages", True) else (
                 " Discord may be hiding its text from me: turn on Message Content Intent in the Developer "
                 "Portal (PlunderBot › Bot) and refit.")
             await interaction.followup.send(
-                "I didn't find any role mentions in that message, so there's nothing to copy." + hidden +
+                "I couldn't work out any roles from that message." + hidden +
                 " Build it with /colours create and /colours add instead.", ephemeral=True)
             return
         title = title or next((e.title for e in msg.embeds if e.title), None) or "Roles"
@@ -386,23 +387,74 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
         while await self.bot.db.menu_by_key(guild.id, key):
             key, n = f"{slug(title)}-{n}", n + 1
         intro = next((e.description for e in msg.embeds if e.description), msg.content or "")
-        intro = "\n".join(line for line in intro.splitlines() if "<@&" not in line).strip() or None
+        kept = [line for line in intro.splitlines()
+                if not ("<@&" in line or (first_emoji(line.strip()) and line.strip().index(first_emoji(line.strip())) <= 2))]
+        intro = "\n".join(kept).strip() or None
         m = await self.bot.db.create_menu(guild.id, key, title, intro[:2000] if intro else None, mode.value)
         added, skipped = [], []
-        for emoji, role_id in pairs[:MAX_OPTIONS]:
+        for emoji, role_id, how, label in found[:MAX_OPTIONS]:
+            if role_id is None:
+                skipped.append(f"{emoji or ''} {label} (no matching role found)".strip())
+                continue
             role = guild.get_role(role_id)
             problem = "it no longer exists" if role is None else self_serve_problem(role, guild.me)
             if problem:
                 skipped.append(f"<@&{role_id}> ({problem})")
                 continue
             await self.bot.db.set_menu_option(m.id, role_id, emoji, None, None)
-            added.append(f"{emoji or ''} {role.mention}".strip())
-        lines = [f"Made **{title}** (key `{key}`) with {len(added)} role(s): " + ", ".join(added)]
+            note = " (worked out from who reacted)" if how == "reactions" else ""
+            added.append(f"{emoji or ''} {role.mention}{note}".strip())
+        lines = [f"Made **{title}** (key `{key}`) with {len(added)} role(s):"] + [f"• {a}" for a in added]
         if skipped:
-            lines.append("Skipped: " + ", ".join(skipped))
+            lines.append("Skipped: " + ", ".join(skipped) + ". Add any of those with /colours add.")
         lines.append("Check it with /colours preview, then /colours post. The old message is untouched.")
         await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True,
                                         allowed_mentions=discord.AllowedMentions.none())
+
+    async def resolve_import(self, guild: discord.Guild, msg, text: str) -> list[tuple]:
+        """(emoji, role id or None, how, label) for each option in a reaction-role message. Roles come
+        from a mention, else a role with the same name, else whoever reacted with that emoji."""
+        me = guild.me
+        pickable = {r.id: r.name for r in guild.roles if self_serve_problem(r, me) is None}
+        entries = parse_lines(text)
+        reactions = {str(r.emoji): r for r in getattr(msg, "reactions", [])}
+        if not entries:  # no list in the text: go by the reactions themselves
+            entries = [{"emoji": e, "role_id": None, "name": ""} for e in reactions]
+        used, out = set(), []
+        pending = []
+        for e in entries:
+            rid, how = e["role_id"], "mention"
+            if rid is None:
+                rid, how = match_role_by_name(e["name"], pickable), "name"
+            if rid is not None:
+                used.add(rid)
+            out.append([e["emoji"], rid, how, e["name"] or (e["emoji"] or "")])
+            if rid is None:
+                pending.append(out[-1])
+        if pending:
+            members = [m for m in getattr(guild, "members", []) if not m.bot]
+            sizes: dict[int, int] = {}
+            for member in members:
+                for r in member.roles:
+                    sizes[r.id] = sizes.get(r.id, 0) + 1
+            for item in pending:
+                reaction = reactions.get(item[0]) if item[0] else None
+                if reaction is None:
+                    continue
+                reactors = []
+                try:
+                    async for user in reaction.users(limit=500):
+                        member = guild.get_member(user.id)
+                        if member is not None and not member.bot:
+                            reactors.append({r.id for r in member.roles})
+                except discord.HTTPException as err:
+                    log.warning("Couldn't read reactions for %s: %s", item[0], err)
+                    continue
+                rid = infer_role(reactors, sizes, len(members), set(pickable) - used)
+                if rid is not None:
+                    item[1], item[2] = rid, "reactions"
+                    used.add(rid)
+        return [tuple(x) for x in out]
 
     @app_commands.command(name="preview", description="See a menu's card privately")
     @app_commands.autocomplete(menu=_menu_ac)

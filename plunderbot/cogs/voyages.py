@@ -284,7 +284,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             try:
                 image_name = await images.save(image, self.bot.config.data_dir)
             except (images.ImageError, discord.HTTPException, OSError) as e:
-                log.info("Voyage picture refused: %s", e)
+                log.warning("Voyage picture refused: %r", e)
                 await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
                 return
         v = await self.bot.db.create_voyage(
@@ -414,7 +414,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             try:
                 changes["image"] = await images.save(image, self.bot.config.data_dir)
             except (images.ImageError, discord.HTTPException, OSError) as e:
-                log.info("Voyage picture refused: %s", e)
+                log.warning("Voyage picture refused: %r", e)
                 await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
                 return
         async with self.lock:

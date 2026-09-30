@@ -25,12 +25,22 @@ def folder(data_dir: Path) -> Path:
 
 async def save(attachment, data_dir: Path) -> str:
     """Keep a copy of an uploaded picture. Returns its stored name; raises ImageError if it won't do."""
+    if (attachment.size or 0) > MAX_BYTES:
+        raise ImageError(f"too big ({attachment.size // (1024 * 1024)} MB; the limit is 10 MB)")
     kind = (attachment.content_type or "").split(";")[0].strip().lower()
-    if kind not in TYPES:
-        raise ImageError("not a picture")
-    if attachment.size > MAX_BYTES:
-        raise ImageError("too big")
+    # Discord's label for the file isn't always there or right, so the bytes decide.
     return save_bytes(await attachment.read(), kind, data_dir)
+
+
+def reason(e: Exception) -> str:
+    """A plain-English reason a picture couldn't be kept, for Quartermasters."""
+    if isinstance(e, ImageError):
+        return str(e) + "."
+    if isinstance(e, discord.HTTPException):
+        return f"Discord wouldn't hand me the file ({e.status})."
+    if isinstance(e, OSError):
+        return f"I couldn't save it on the server ({e.strerror or e})."
+    return str(e)
 
 
 def sniff(data: bytes) -> str | None:
@@ -47,14 +57,13 @@ def sniff(data: bytes) -> str | None:
 
 
 def save_bytes(data: bytes, content_type: str | None, data_dir: Path) -> str:
-    kind = (content_type or "").split(";")[0].strip().lower()
-    if kind not in TYPES:
-        kind = sniff(data) or ""
+    label = (content_type or "").split(";")[0].strip().lower()
+    kind = sniff(data) or label  # the file's own first bytes beat whatever it was labelled
     ext = TYPES.get(kind)
     if ext is None:
-        raise ImageError("not a picture")
+        raise ImageError(f"not a PNG, JPG, GIF or WEBP picture (Discord called it {content_type or 'nothing'})")
     if len(data) > MAX_BYTES:
-        raise ImageError("too big")
+        raise ImageError("too big (the limit is 10 MB)")
     name = f"{hashlib.sha256(data).hexdigest()[:32]}.{ext}"
     path = folder(data_dir) / name
     if not path.exists():

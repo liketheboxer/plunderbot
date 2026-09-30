@@ -42,11 +42,19 @@ async def test_save_and_attach(tmp_path):
     assert not images.show(discord.Embed(), "missing.png", tmp_path).image
 
 
-@pytest.mark.parametrize("att", [Attachment(content_type="application/pdf"), Attachment(content_type=None),
+@pytest.mark.parametrize("att", [Attachment(data=b"%PDF-1.7 not a picture", content_type="application/pdf"),
+                                 Attachment(data=b"hello", content_type=None),
                                  Attachment(size=images.MAX_BYTES + 1)])
 async def test_refuse_non_pictures(tmp_path, att):
     with pytest.raises(images.ImageError):
         await images.save(att, tmp_path)
+
+
+@pytest.mark.parametrize("label", [None, "", "application/octet-stream", "image/png"])
+async def test_the_bytes_decide_not_the_label(tmp_path, label):
+    gif = b"GIF89a" + b"\x00" * 40
+    name = await images.save(Attachment(data=gif, content_type=label), tmp_path)
+    assert name.endswith(".gif")
 
 
 # ------------------------------------------------------------ voyages
@@ -85,7 +93,7 @@ async def test_no_attach_permission_posts_without_the_file(env):
 
 async def test_bad_picture_is_refused(env):
     bot, cog, guild, text = env
-    inter = await make_voyage(cog, guild, image=Attachment(content_type="text/plain"))
+    inter = await make_voyage(cog, guild, image=Attachment(data=b"just text", content_type="text/plain"))
     assert "PNG" in inter.followup.sent[-1]
     assert await bot.db.voyages_with_status("scheduled") == []
 

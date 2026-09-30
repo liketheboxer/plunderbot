@@ -264,8 +264,10 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
         if image is not None:
             try:
                 name = await images.save(image, self.data_dir)
-            except (images.ImageError, discord.HTTPException, OSError):
-                await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
+            except (images.ImageError, discord.HTTPException, OSError) as e:
+                log.warning("Section picture refused (%s, %s, %s bytes): %r", image.filename, image.content_type,
+                            image.size, e)
+                await interaction.followup.send(f"I couldn't use that picture: {images.reason(e)}", ephemeral=True)
                 return
         changes = {"image": name} if (image is not None or style is None) else {}
         if style is not None:

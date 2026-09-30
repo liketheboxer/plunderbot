@@ -122,7 +122,7 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
             try:
                 image_name = await images.save(image, self.bot.config.data_dir)
             except (images.ImageError, discord.HTTPException, OSError) as e:
-                log.info("Crew picture refused: %s", e)
+                log.warning("Crew picture refused: %r", e)
                 await self._say(interaction, voice.say("image_bad"))
                 return
 

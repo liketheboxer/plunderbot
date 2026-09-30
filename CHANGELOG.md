@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.4 (2026-09-29): Importing MEE6 role menus
+
+- `/colours import` reads menus that list role names instead of mentioning roles (as MEE6's do). Each line's role is found by its name, or, if the role has been renamed since, by the role most of the people who reacted with that emoji wear.
+- The reply lists how each role was found and any lines it couldn't match.
+
+## 0.5.3 (2026-09-29): Picture uploads
+
+- Uploaded pictures are recognised from the file itself rather than Discord's label for it, so GIFs and other pictures Discord labels oddly are accepted.
+- When a picture is refused, `/noticeboard section image` says why, and the reason is logged.
+
 ## 0.5.2 (2026-09-29): Reading old posts
 
 - PlunderBot asks for Discord's Message Content Intent so it can read posts made by other apps (such as MEE6's welcome and rules) when importing them. It's also needed later for Parley and Articles. If the intent is off in the Developer Portal, PlunderBot starts without it and says so in its log.

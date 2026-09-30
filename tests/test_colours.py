@@ -61,8 +61,8 @@ class Role:
 
 
 class Member:
-    def __init__(self, uid, *roles):
-        self.id, self.roles = uid, list(roles)
+    def __init__(self, uid, *roles, bot=False):
+        self.id, self.roles, self.bot = uid, list(roles), bot
 
     async def add_roles(self, *roles, reason=None):
         self.roles.extend(r for r in roles if r not in self.roles)
@@ -71,15 +71,26 @@ class Member:
         self.roles = [r for r in self.roles if r not in roles]
 
 
+class RoleMap(dict):
+    """guild.roles in Discord is a list; tests also look roles up by id."""
+
+    def __iter__(self):
+        return iter(list(self.values()))
+
+
 class Guild:
     def __init__(self, roles):
         self.id = 5
-        self.roles = {r.id: r for r in roles}
+        self.roles = RoleMap({r.id: r for r in roles})
+        self.members = []
         self.me = SimpleNamespace(top_role=Role(0, "PlunderBot", position=50))
         self.channels = {}
 
     def get_role(self, rid):
-        return self.roles.get(rid)
+        return dict.get(self.roles, rid)
+
+    def get_member(self, uid):
+        return next((m for m in self.members if m.id == uid), None)
 
     def get_channel(self, cid):
         return self.channels.get(cid)
@@ -244,3 +255,52 @@ async def test_move_and_remove(env):
     assert [o.role_id for o in (await bot.db.get_menu(menu.id)).options] == [R + 3, R + 1, R + 2]
     assert await bot.db.remove_menu_option(menu.id, R + 1)
     assert [o.role_id for o in (await bot.db.get_menu(menu.id)).options] == [R + 3, R + 2]
+
+
+async def test_import_by_name_and_by_who_reacted(env):
+    """MEE6's region message lists role names (not mentions), and two roles were renamed since."""
+    bot, cog, guild, menu = env
+    west, east, asia = guild.roles[R + 1], guild.roles[R + 2], guild.roles[R + 3]
+    uk = Role(R + 4, "UK")
+    guild.roles[R + 4] = uk
+    guild.members = ([Member(i, west) for i in range(1, 6)] + [Member(i, east) for i in range(6, 9)]
+                     + [Member(9, asia), Member(10, uk)] + [Member(i) for i in range(11, 20)])
+    embed = discord.Embed(title="React For Region Roles", description=(
+        "Set your region tag in your profile!\n\n**Region Based Roles**\n"
+        "🇼 North America - West\n🇪 North America - East\n💂 UK\n🌏 Asia\n🇸 South/Central America"))
+
+    class Reaction:
+        def __init__(self, emoji, ids):
+            self.emoji, self.ids = emoji, ids
+
+        async def users(self, limit=None):
+            for i in self.ids:
+                yield SimpleNamespace(id=i)
+
+    reactions = [Reaction("🇼", [1, 2, 3, 4, 11]), Reaction("🇪", [6, 7, 8]), Reaction("💂", [10]),
+                 Reaction("🌏", [9]), Reaction("🇸", [12])]
+
+    class Channel:
+        async def fetch_message(self, mid):
+            return SimpleNamespace(content="", embeds=[embed], reactions=reactions, author=SimpleNamespace(id=0))
+
+    guild.channels[77] = Channel()
+    guild.me.id = 999
+    inter = interaction(guild, Member(1))
+    await cog.import_.callback(cog, inter, "https://discord.com/channels/5/77/88",
+                               SimpleNamespace(value="single", name="one"))
+    new = await bot.db.menu_by_key(5, "react-for-region-roles")
+    # West and East were renamed (Pacific/Eastern): found from who reacted. UK and Asia by name.
+    assert [(o.emoji, o.role_id) for o in new.options] == [("🇼", R + 1), ("🇪", R + 2), ("💂", R + 4), ("🌏", R + 3)]
+    assert "South/Central America" in inter.followup.sent[0] and "who reacted" in inter.followup.sent[0]
+    assert new.description.startswith("Set your region tag") and "🇼" not in new.description
+
+
+def test_parse_lines_and_infer():
+    from plunderbot.menu_logic import infer_role, match_role_by_name, parse_lines
+    lines = parse_lines("Intro text\n**Header**\n🇼 North America - West\n➡️ : EU-East\n<@&123456789012345678>")
+    assert [(l["emoji"], l["name"]) for l in lines[:2]] == [("🇼", "North America   West"), ("➡️", "EU East")] or \
+        [l["emoji"] for l in lines] == ["🇼", "➡️", None]
+    assert match_role_by_name("EU East", {1: "EU-East", 2: "EU-West"}) == 1
+    assert infer_role([{1, 9}, {1}, {1, 9}], {1: 3, 9: 30}, 40, {1, 9}) == 1
+    assert infer_role([{9}, {2}, {3}], {9: 30, 2: 1, 3: 1}, 40, {9, 2, 3}) is None

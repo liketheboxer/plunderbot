@@ -101,3 +101,56 @@ def render_menu(menu, colour: discord.Colour | None = None) -> discord.Embed:
     hint = "Pick one" if menu.mode == "single" else "Pick as many as you like"
     embed.set_footer(text=f"{hint}. Press the button to choose; you can change your mind any time.")
     return embed
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower().replace("&", "and"))
+
+
+def parse_lines(text: str) -> list[dict]:
+    """Option lines of a reaction-role message, in order: {"emoji", "role_id", "name"}. A line counts
+    if it starts with an emoji or mentions a role; "🇼 North America - West" gives the name text."""
+    out = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        m = _ROLE.search(line)
+        emoji = first_emoji(line)
+        starts = emoji is not None and line.index(emoji) <= 2
+        if not (m or starts):
+            continue
+        name = line
+        if emoji:
+            name = name.replace(emoji, " ", 1)
+        name = _ROLE.sub(" ", name)
+        name = re.sub(r"[*_~`>|•:\-–—]+", " ", name).strip()
+        out.append({"emoji": emoji, "role_id": int(m.group(1)) if m else None, "name": name})
+    return out
+
+
+def match_role_by_name(name: str, roles: dict[int, str]) -> int | None:
+    """A role whose name matches, ignoring case, spaces and punctuation."""
+    want = _plain(name)
+    if not want:
+        return None
+    hits = [rid for rid, rname in roles.items() if _plain(rname) == want]
+    return hits[0] if len(hits) == 1 else None
+
+
+def infer_role(reactor_roles: list[set[int]], role_sizes: dict[int, int], guild_size: int,
+               candidates: set[int]) -> int | None:
+    """Which role a reaction handed out, judged by the people who reacted: the role at least half of
+    them wear that's much more common among them than across the server. Works after a rename."""
+    n = len(reactor_roles)
+    if n == 0 or guild_size <= 0:
+        return None
+    best, best_lift = None, 0.2
+    for rid in candidates:
+        share = sum(1 for s in reactor_roles if rid in s) / n
+        if share < 0.5:
+            continue
+        lift = share - role_sizes.get(rid, 0) / guild_size
+        if lift > best_lift:
+            best, best_lift = rid, lift
+    return best
