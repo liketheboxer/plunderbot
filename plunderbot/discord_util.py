@@ -27,6 +27,15 @@ def self_serve_problem(role: discord.Role, me: discord.Member) -> str | None:
     return None
 
 
+def addressed_to(bot_id: int, message) -> bool:
+    """Whether a message @mentions the bot or replies to one of its messages."""
+    if bot_id in (getattr(message, "raw_mentions", None) or []):
+        return True
+    ref = getattr(message, "reference", None)
+    resolved = getattr(ref, "resolved", None) if ref else None
+    return isinstance(resolved, discord.Message) and resolved.author.id == bot_id
+
+
 def parse_message_link(text: str) -> tuple[int, int, int] | None:
     m = _LINK.search(text or "")
     return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None

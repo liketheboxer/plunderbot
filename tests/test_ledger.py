@@ -432,3 +432,88 @@ async def test_admin_remove_takes_the_post_down(env):
     i = interaction(guild, 1, mod=True)
     await admin.ledger_remove.callback(admin, i, entry=e.id)
     assert await bot.db.get_log(e.id) is None and deleted and "gone" in i.response.sent[0]
+
+
+# ------------------------------------------------------------ a screenshot posted to PlunderBot in chat
+BOT_ID = 999
+
+
+class Typing:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+def chat_message(guild, author_id, content, pics=1, reply_to=None):
+    async def read():
+        return _png(800, 450)
+    attachments = [SimpleNamespace(content_type="image/png", filename="log.png", size=10, read=read)
+                   for _ in range(pics)]
+    ref = SimpleNamespace(resolved=reply_to) if reply_to is not None else None
+    msg = SimpleNamespace(guild=guild, author=SimpleNamespace(id=author_id, bot=False, display_name="Boxer"),
+                          content=content, attachments=attachments, reference=ref,
+                          raw_mentions=[BOT_ID] if f"<@{BOT_ID}>" in content else [],
+                          channel=SimpleNamespace(id=guild.text.id, typing=lambda: Typing()), replies=[])
+
+    async def reply(text, **kw):
+        msg.replies.append((text, kw))
+        return SimpleNamespace(id=4242)
+    msg.reply = reply
+    return msg
+
+
+def bot_said(text, embeds=()):
+    import discord
+    m = object.__new__(discord.Message)
+    m.author = SimpleNamespace(id=BOT_ID)
+    m.content, m.embeds = text, list(embeds)
+    return m
+
+
+@pytest.fixture
+def as_bot(env, monkeypatch):
+    bot = env[0]
+    monkeypatch.setattr(type(bot), "user", property(lambda self: SimpleNamespace(id=BOT_ID)))
+    return env
+
+
+async def test_which_chat_screenshots_are_captains_logs(as_bot):
+    bot, cog, guild, text = as_bot
+    nudge = bot_said("📸 Ledger duty! Screenshot the Captain's Log ... `/ship log`.")
+    assert cog.wants(chat_message(guild, 1, "Here are my stats!", reply_to=nudge))
+    assert cog.wants(chat_message(guild, 1, f"<@{BOT_ID}>"))
+    assert cog.wants(chat_message(guild, 1, f"<@{BOT_ID}> Add these captains log stats to my last voyage"))
+    assert cog.wants(chat_message(guild, 1, "", reply_to=bot_said("Ahoy! You rang?")))
+    assert not cog.wants(chat_message(guild, 1, f"<@{BOT_ID}> what island is this?"))
+    assert not cog.wants(chat_message(guild, 1, f"<@{BOT_ID}> my stats", pics=0))
+    assert not cog.wants(chat_message(guild, 1, "my stats"))  # not addressed to PlunderBot
+
+
+async def test_a_reply_with_a_screenshot_is_read_and_confirmed_in_place(as_bot):
+    bot, cog, guild, text = as_bot
+    crew = await sailed_crew(bot, guild)
+    parley = bot.get_cog("Parley")
+    parley.claude = FakeClaude([reading(gold=392040, doubloons=0)])
+    await bot.db.update_settings(10, parley_enabled=1)
+    msg = chat_message(guild, 1, "Here are my stats!", reply_to=bot_said("Ledger duty ... Captain's Log"))
+    await parley.on_message(msg)   # Parley stays out of it...
+    await cog.on_message(msg)      # ...and the ledger reads it
+    assert len(parley.claude.calls) == 1 and len(msg.replies) == 1
+    reply, kw = msg.replies[0]
+    assert "392,040" in kw["embed"].description
+    entry_id = int(kw["view"].children[0].custom_id.split(":")[-1])
+
+    stranger = interaction(guild, 3)
+    await cog.on_button(stranger, "ok", entry_id)
+    assert "Only the pirate" in stranger.response.sent[0]
+
+    ok = interaction(guild, 1)
+    ok.message = SimpleNamespace(id=4242, flags=SimpleNamespace(ephemeral=False))
+    before = len(text.sent)
+    await cog.on_button(ok, "ok", entry_id)
+    entry = await bot.db.get_log(entry_id)
+    assert entry.status == "confirmed" and entry.message_id == 4242
+    assert "392,040" in ok.response.edits[0]["content"] and len(text.sent) == before  # no second post
+    assert (await bot.db.ledger_totals(10, user_id=2)).gold == 392040

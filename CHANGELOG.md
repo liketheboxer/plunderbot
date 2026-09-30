@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1 (2026-09-29): Hand PlunderBot your Captain's Log
+
+- Reply to PlunderBot (or @mention it) with a Captain's Log screenshot and it reads it right there: no words needed, or words like "here are my stats". The reading gets Confirm / Edit / Cancel buttons that only the poster can press; confirmed, that message becomes the ledger entry.
+- Parley no longer invents commands (it suggested a `/plunder submit` that doesn't exist): the full command list is in its instructions, and it knows it can't see pictures.
+- The screenshot reader knows the Captain's Log "Current Voyage" pages (days at sea, miles sailed, quests, fish, gold earned).
+
 ## 0.8.0 (2026-09-29): The Ship's Ledger
 
 Phase 7.

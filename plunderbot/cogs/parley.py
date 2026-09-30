@@ -18,6 +18,7 @@ from discord.ext import commands
 from .. import games, voice
 from ..ai import AIError, Claude, Kagi
 from ..birthday_logic import upcoming, zone
+from ..discord_util import addressed_to
 from ..parley_logic import (COMMANDS_HELP, COOLDOWN_SECONDS, MAX_ROUNDS, TOOLS, build_messages, cost, refusal,
                             reply_text, safe, strip_bot_mention, system_prompt)
 from ..voyage_logic import zone_from_name, zone_label
@@ -42,13 +43,7 @@ class Parley(commands.Cog):
     # ------------------------------------------------------------ when to answer
     def addressed(self, message: discord.Message) -> bool:
         me = self.bot.user
-        if me is None:
-            return False
-        if me.id in getattr(message, "raw_mentions", []):
-            return True
-        ref = message.reference
-        resolved = getattr(ref, "resolved", None) if ref else None
-        return isinstance(resolved, discord.Message) and resolved.author.id == me.id
+        return me is not None and addressed_to(me.id, message)
 
     async def allowed_here(self, message: discord.Message) -> bool:
         channel = message.channel
@@ -65,6 +60,9 @@ class Parley(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot or not self.addressed(message):
             return
+        ledger = self.bot.get_cog("ShipLedger")
+        if ledger is not None and ledger.wants(message):
+            return  # a Captain's Log screenshot: the Ship's Ledger reads it
         s = await self.bot.db.get_settings(message.guild.id)
         if not s.parley_enabled or self.claude is None:
             return

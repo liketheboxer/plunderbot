@@ -94,7 +94,10 @@ READ_TOOL = {
 READ_SYSTEM = ("You read Sea of Thieves Captain's Log screenshots for a Discord bot's ledger. Report only what is "
                "visibly written on the page; never guess or invent a number. Numbers are whole: read '12,345' as "
                "12345. If a value isn't shown, use 0 or leave it out. Always answer by calling "
-               "record_captains_log.")
+               "record_captains_log. The Captain's Log 'Current Voyage' pages usually show Days at sea, Days since "
+               "last sinking, Nautical miles sailed, Quests completed, Fish caught and Gold earned; put Gold earned in "
+               "gold and everything else in stats, using the labels as written. Handwritten-style numbers: read "
+               "each digit carefully.")
 READ_PROMPT = "Here's the Captain's Log from our voyage. Record what it shows."
 
 

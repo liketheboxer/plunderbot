@@ -21,6 +21,7 @@ from discord.ext import commands
 from .. import images, voice
 from ..ai import AIError
 from ..crew_logic import iso, now_utc
+from ..discord_util import addressed_to
 from ..ledger_logic import (KINDS, PENDING_LIFETIME, READ_SYSTEM, READ_TOOL, RECENT_CREW, ask_at_end, can_change,
                             dump_rows, haul_line, ledger_summary, load_rows, log_keeper, parse_number,
                             parse_reputation, parse_stats, pick_crew, prepare_image, read_messages, read_response,
@@ -31,6 +32,17 @@ from ..parley_logic import cost
 log = logging.getLogger("plunderbot.ledger")
 
 MAX_SHIPS = 10
+LOG_WORDS = re.compile(r"\b(log|logs|ledger|stats?|plunder|gold|haul|voyage|captain'?s?|loot|doubloons?)\b", re.I)
+PICTURE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def screenshot_of(message):
+    """The first picture attached to a message, if any."""
+    for a in getattr(message, "attachments", None) or []:
+        kind = (a.content_type or "").lower()
+        if kind.startswith("image/") or (a.filename or "").lower().endswith(PICTURE_EXT):
+            return a
+    return None
 MAX_UPLOAD = 25 * 1024 * 1024
 KIND_CHOICES = [app_commands.Choice(name=k, value=k) for k in KINDS]
 
@@ -291,8 +303,14 @@ class ShipLedger(commands.Cog):
     async def ship_log(self, interaction: discord.Interaction, screenshot: discord.Attachment | None = None,
                        crew: str | None = None, ship: str | None = None) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
-        guild, user, now = interaction.guild, interaction.user, now_utc()
-        db = self.bot.db
+        text, embed, view = await self.start_reading(interaction.guild, interaction.user, screenshot, crew, ship)
+        kw = {"embed": embed, "view": view} if embed is not None else {}
+        await interaction.followup.send(text, ephemeral=True, **kw)
+
+    async def start_reading(self, guild, user, screenshot=None, crew: str | None = None, ship: str | None = None):
+        """Read a Captain's Log into a pending ledger entry. Returns (text, embed, view) to show the member;
+        embed and view are None when there's nothing to confirm."""
+        now, db = now_utc(), self.bot.db
         await db.prune_pending_logs(iso(now - PENDING_LIFETIME))
 
         chosen = None
@@ -316,14 +334,13 @@ class ShipLedger(commands.Cog):
         if chosen is not None:
             existing = await db.confirmed_log_for_crew(chosen.id)
             if existing and not can_change(user.id, existing, chosen, found, _is_mod(user)):
-                await interaction.followup.send(voice.say("ledger_replace_denied"), ephemeral=True)
-                return
+                return voice.say("ledger_replace_denied"), None, None
 
-        haul, line, notes = None, "ledger_read_failed", None
+        haul, line, notes = None, "ledger_manual", None
         if screenshot is not None:
-            haul, line = await self.read(interaction, screenshot)
-            if line is None:  # already answered (a picture that wouldn't open)
-                return
+            haul, line, error = await self.read(guild.id, screenshot)
+            if error:  # a picture that wouldn't open
+                return voice.say(line, error=error), None, None
         entry = await db.create_log(
             guild_id=guild.id, crew_id=chosen.id if chosen else None, ship_id=found.id if found else None,
             logged_by=user.id, created_at=iso(now), source="screenshot" if haul else "manual",
@@ -332,46 +349,80 @@ class ShipLedger(commands.Cog):
             stats=dump_rows(haul.stats if haul else []), pirates=list(chosen.members) if chosen else [user.id])
         if haul is not None:
             notes = haul.notes
-        if screenshot is None:
-            line = "ledger_manual"
-        await interaction.followup.send(voice.say(line), embed=render_log(entry, ship=found, crew=chosen, pending=True,
-                                                                          notes=notes),
-                                        view=reading_view(entry), ephemeral=True)
+        return (voice.say(line), render_log(entry, ship=found, crew=chosen, pending=True, notes=notes),
+                reading_view(entry))
 
-    async def read(self, interaction, screenshot):
-        """(haul or None, the voice line to show). (None, None) if the member has already been told why not."""
+    async def read(self, guild_id: int, screenshot):
+        """(haul or None, the voice line to show, why the picture wouldn't open or None)."""
         claude = self.claude
         if claude is None:
-            return None, "ledger_read_failed"
-        s = await self.bot.db.get_settings(interaction.guild_id)
+            return None, "ledger_read_failed", None
+        s = await self.bot.db.get_settings(guild_id)
         parley = self.bot.get_cog("Parley")
         month = parley.today(s)[1] if parley else datetime.now(timezone.utc).strftime("%Y-%m")
-        spent, _ = await self.bot.db.parley_spend(interaction.guild_id, month)
+        spent, _ = await self.bot.db.parley_spend(guild_id, month)
         if spent >= s.parley_budget_cents / 100:
-            return None, "ledger_no_budget"
+            return None, "ledger_no_budget", None
         try:
             if (screenshot.size or 0) > MAX_UPLOAD:
                 raise images.ImageError("over 25 MB")
             media_type, b64 = prepare_image(await screenshot.read())
         except (images.ImageError, discord.HTTPException, OSError) as e:
-            await interaction.followup.send(voice.say("ledger_bad_image", error=images.reason(e).rstrip(".")),
-                                            ephemeral=True)
-            return None, None
+            return None, "ledger_bad_image", images.reason(e).rstrip(".")
         try:
             resp = await claude.create(system=READ_SYSTEM, messages=read_messages(media_type, b64), tools=[READ_TOOL],
                                        tool_choice={"type": "tool", "name": READ_TOOL["name"]}, max_tokens=800)
         except (AIError, OSError, TimeoutError) as e:
             log.warning("Couldn't read a Captain's Log: %s", e)
-            return None, "ledger_read_failed"
+            return None, "ledger_read_failed", None
         usage = resp.get("usage") or {}
-        await self.bot.db.add_parley_spend(interaction.guild_id, month, cost(usage), usage.get("input_tokens", 0),
+        await self.bot.db.add_parley_spend(guild_id, month, cost(usage), usage.get("input_tokens", 0),
                                            usage.get("output_tokens", 0))
         haul = read_response(resp)
         if haul is None:
-            return None, "ledger_read_failed"
+            return None, "ledger_read_failed", None
         if not haul.is_log:
-            return haul, "ledger_not_a_log"
-        return haul, "ledger_check"
+            return haul, "ledger_not_a_log", None
+        return haul, "ledger_check", None
+
+    # ------------------------------------------------------------ a screenshot posted to PlunderBot in chat
+    def wants(self, message) -> bool:
+        """A message PlunderBot should read as a Captain's Log: addressed to it (an @mention or a reply), with a
+        picture, and either no words, words about the log, or a reply to one of its ledger messages."""
+        me = self.bot.user
+        if me is None or message.guild is None or message.author.bot or not addressed_to(me.id, message):
+            return False
+        if screenshot_of(message) is None:
+            return False
+        text = re.sub(rf"<@!?{me.id}>", "", message.content or "").strip()
+        ref = message.reference
+        replied = getattr(ref, "resolved", None) if ref else None
+        if isinstance(replied, discord.Message) and replied.author.id == me.id and (
+                "Captain's Log" in (replied.content or "") or "/ship log" in (replied.content or "")
+                or any("Captain's Log" in (e.title or "") for e in replied.embeds)):
+            return True
+        return not text or bool(LOG_WORDS.search(text))
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if not self.wants(message):
+            return
+        s = await self.bot.db.get_settings(message.guild.id)
+        author = message.author
+        if s.pending_role_id and hasattr(author, "get_role") and author.get_role(s.pending_role_id):
+            return
+        try:
+            async with message.channel.typing():
+                text, embed, view = await self.start_reading(message.guild, author, screenshot_of(message))
+            kw = {"embed": embed, "view": view} if embed is not None else {}
+            await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none(), **kw)
+        except Exception:
+            log.exception("Couldn't read a Captain's Log posted in chat")
+            try:
+                await message.reply(voice.say("ledger_read_failed"), mention_author=False,
+                                    allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException:
+                pass
 
     @property
     def claude(self):
@@ -448,6 +499,19 @@ class ShipLedger(commands.Cog):
         entry = await db.update_log(entry.id, status="confirmed", confirmed_at=iso(now_utc()))
         if old is not None:
             await self.remove(guild, old)
+        message = getattr(interaction, "message", None)
+        public = message is not None and not getattr(getattr(message, "flags", None), "ephemeral", True)
+        channel_id = getattr(interaction.channel, "id", None)
+        if public and (crew is None or crew.channel_id == channel_id):
+            # Read from a screenshot posted in chat, right where the crew is: that post becomes the ledger entry.
+            await interaction.response.edit_message(
+                content=voice.say("ledger_logged", haul=haul_line(entry.gold, entry.doubloons)),
+                embed=render_log(entry, ship=ship, crew=crew), view=None)
+            await db.update_log(entry.id, channel_id=channel_id, message_id=message.id)
+            crew_cog = self.bot.get_cog("CrewCall")
+            if crew is not None and crew_cog is not None:
+                await crew_cog.refresh_card(guild, await db.get_crew(crew.id))
+            return
         await interaction.response.edit_message(content=voice.say("ledger_confirmed"),
                                                 embed=render_log(entry, ship=ship, crew=crew), view=None)
         await self.announce(guild, entry, crew, ship, fallback=interaction.channel)
