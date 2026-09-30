@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.3 (2026-09-30): Game Index threads
+
+- The Game Index links each game's forum thread by its address ("💬 thread") instead of mentioning it. Discord shows a mention of a thread that has gone quiet (archived after a week without posts) as "#unknown" to anyone who hasn't opened it, so most quieter games showed "#unknown". Run `/noticeboard gameindex` (or Post it on Daisho) after the refit to rebuild it.
+
 ## 1.1.2 (2026-09-30): Gangplank roles stay off menus
 
 - The Gangplank's **Pending** and **Harbormaster** roles can no longer be self-serve: not on a role menu (from `/colours add`, `/colours import` or Daisho's editor), not in Follow games, and not in an article's role action. Before, a Pending role put on a menu would have let a newcomer untick it and skip the Gangplank. Daisho's editor stops offering them.

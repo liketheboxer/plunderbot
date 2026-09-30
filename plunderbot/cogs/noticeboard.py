@@ -608,7 +608,7 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
             intro += f" Chat about any of them in <#{s.forum_channel_id}>."
         intro += "\nPress **Follow games** to pick the ones you want to hear about."
         embeds = []
-        for i, text in enumerate(chunk_lines(game_index_lines(entries), 3800)):
+        for i, text in enumerate(chunk_lines(game_index_lines(entries, guild.id), 3800)):
             e = discord.Embed(colour=discord.Colour(0x1F8B8B), description=(intro + "\n\n" + text) if i == 0 else text)
             if i == 0:
                 e.title = "Game Index"

@@ -253,7 +253,9 @@ async def test_game_index(index_env):
     assert entries["nms"]["thread_id"] is None and "event" not in entries
     msg = await cog.game_index_message(guild)
     text = msg["embeds"][0].description
-    assert "<#61>" in text and f"<@&{R + 1}>" in text and msg["view"] is not None
+    # threads are linked by address, so an archived one never shows as "#unknown" (1.1.3)
+    assert "(https://discord.com/channels/5/61)" in text and "<#61>" not in text
+    assert f"<@&{R + 1}>" in text and msg["view"] is not None
 
 
 async def test_follow_and_unfollow(index_env):

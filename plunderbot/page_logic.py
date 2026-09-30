@@ -135,13 +135,18 @@ def plan_sections(parts: list[dict]) -> list[dict]:
     return out
 
 
-def game_index_lines(entries: list[dict]) -> list[str]:
-    """One line per game: emoji, name, its forum thread and its ping role, when it has them."""
+def game_index_lines(entries: list[dict], guild_id: int | None = None) -> list[str]:
+    """One line per game: emoji, name, its forum thread and its ping role, when it has them.
+
+    A thread is linked by its address, not mentioned as <#id>: Discord shows a mention of a thread that
+    has gone quiet (archived) as "#unknown" until the reader has opened it, and forum threads for
+    quieter games archive after a week (1.1.3)."""
     lines = []
     for e in entries:
         bits = [f"{e['emoji']} **{e['name']}**"]
         if e.get("thread_id"):
-            bits.append(f"<#{e['thread_id']}>")
+            bits.append(f"[💬 thread](https://discord.com/channels/{guild_id}/{e['thread_id']})" if guild_id
+                        else f"<#{e['thread_id']}>")
         if e.get("role_id"):
             bits.append(f"<@&{e['role_id']}>")
         lines.append(" · ".join(bits))
