@@ -290,3 +290,24 @@ def cooldown_key(article: Article, channel_id: int | None, member_id: int | None
 
 def rolls(chance: int, rng: random.Random | None = None) -> bool:
     return chance >= 100 or (rng or random).random() * 100 < chance
+
+
+_EMOJI = re.compile(r"<a?:\w+:\d+>|:([\w~]{2,32}):")
+
+
+def server_emoji(text: str, emojis) -> str:
+    """Turn :Bruh: into the server's own Bruh emoji. Pop-up forms can't use the emoji picker, so the short
+    name is how Quartermasters type them. Unknown names and ready-made emoji are left alone."""
+    if not text or not emojis:
+        return text
+    by_name = {}
+    for e in emojis:
+        by_name.setdefault(e.name, e)
+        by_name.setdefault(e.name.lower(), e)
+
+    def swap(m):
+        if m.group(1) is None:
+            return m.group(0)
+        e = by_name.get(m.group(1)) or by_name.get(m.group(1).lower())
+        return str(e) if e is not None else m.group(0)
+    return _EMOJI.sub(swap, text)

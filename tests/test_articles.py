@@ -57,6 +57,21 @@ def test_replies_and_templates():
         ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "102nd", "1,001st"]
 
 
+def test_server_emoji_by_name():
+
+    class E:
+        def __init__(self, name, eid):
+            self.name, self.id = name, eid
+
+        def __str__(self):
+            return f"<:{self.name}:{self.id}>"
+    emojis = [E("Bruh", 77), E("yar", 78)]
+    assert A.server_emoji(":Bruh:", emojis) == "<:Bruh:77>"
+    assert A.server_emoji(":bruh: and :YAR: and :nope:", emojis) == "<:Bruh:77> and <:yar:78> and :nope:"
+    assert A.server_emoji("<:Bruh:77> stays", emojis) == "<:Bruh:77> stays"
+    assert A.server_emoji("10:30:45", emojis) == "10:30:45"
+
+
 def test_actions_must_fit_the_trigger():
     assert A.action_problem(A.KEYWORD, {"type": "pin"}) is None
     assert A.action_problem(A.JOIN, {"type": "pin"})
@@ -316,6 +331,8 @@ async def test_setting_up_an_article_by_command(env):
     i = interaction(guild)
     await cog.reply.callback(cog, i, name="Bruh")
     form = i.response.modal
+    for item in form.children:  # Discord refuses a form whose hints run past 100 characters
+        assert len(item.placeholder or "") <= 100
     form.texts._value = "Bruh.\n---\n{nth} bruh"
     j = interaction(guild)
     await cog.add_reply(j, form.article_id, form.texts._value, None, None)

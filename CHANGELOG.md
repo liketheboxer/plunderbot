@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1 (2026-09-29): Server emoji in articles
+
+- Type a server emoji's name, like `:Bruh:`, in an article's replies (the pop-up form has no emoji picker) or in `/articles react`, and PlunderBot uses the real emoji. A reply can be just the emoji.
+- Fixed: the reply form's hint text was over Discord's 100-character limit, which could stop the form opening.
+
 ## 0.9.0 (2026-09-29): Articles
 
 Phase 8.

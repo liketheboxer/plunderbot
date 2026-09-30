@@ -22,7 +22,7 @@ from ..articles_logic import (ACTIONS, BOOST, COOLDOWN_SCOPES, COUNT, JOIN, KEYW
                               MESSAGE_TRIGGERS, PIN, REACT, REACTION, REPLY, REPOST, ROLE, ROLE_ADDED, ROLE_REMOVED,
                               SCHEDULE, TRIGGERS, action_problem, clean_name, cooldown_key, describe_action,
                               describe_trigger, fill, keyword_hit, next_run, ordinal, parse_schedule, pick, rolls,
-                              split_keywords, split_replies)
+                              server_emoji, split_keywords, split_replies)
 from ..birthday_logic import zone
 from ..crew_logic import iso
 from ..discord_util import self_serve_problem
@@ -51,7 +51,7 @@ class ReplyForm(discord.ui.Modal, title="What PlunderBot says"):
         self.cog, self.article_id, self.channel_id, self.image = cog, article.id, channel_id, image
         self.texts = discord.ui.TextInput(
             label="Replies (one is picked at random)", style=discord.TextStyle.paragraph, max_length=4000,
-            placeholder="Bruh. ({count} bruhs and counting)\n---\nBRUH.\n---\nA line with just --- starts another reply.")
+            placeholder=":Bruh:\n---\n{name}'s {nth} bruh\n---\n(A line with just --- starts another reply.)")
         self.add_item(self.texts)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -240,10 +240,12 @@ class Articles(commands.GroupCog, group_name="articles", group_description="The 
         await self.add_action(interaction, article, action)
 
     @app_commands.command(name="react", description="Add a reaction to the message that set it off")
+    @app_commands.describe(emoji="Pick it, paste it, or type a server emoji's name like :Bruh:")
     async def react(self, interaction: discord.Interaction, name: str, emoji: str) -> None:
         article = await self.find(interaction, name)
         if article is not None:
-            await self.add_action(interaction, article, {"type": REACT, "emoji": emoji.strip()})
+            emoji = server_emoji(emoji.strip(), getattr(interaction.guild, "emojis", ()))
+            await self.add_action(interaction, article, {"type": REACT, "emoji": emoji})
 
     @app_commands.command(name="role", description="Give or take a role from the member, for good or for a while")
     @app_commands.describe(give="Give it (default) or take it away", minutes="Undo it after this many minutes")
@@ -501,7 +503,7 @@ class Articles(commands.GroupCog, group_name="articles", group_description="The 
             template = pick(action.get("texts") or [], rng)
             if not template:
                 return
-            text = fill(template, values)[:2000]
+            text = server_emoji(fill(template, values), getattr(guild, "emojis", ()))[:2000]
             users = [member] if member is not None and "{member}" in template else []
             if "{author}" in template and message is not None:
                 users.append(message.author)
