@@ -411,6 +411,16 @@ MIGRATIONS: list[str] = [
     ALTER TABLE role_menus ADD COLUMN button_label TEXT;
     ALTER TABLE role_menus ADD COLUMN button_emoji TEXT;
     """,
+    # 1.3.0: music in voice channels
+    """
+    ALTER TABLE guild_settings ADD COLUMN music_enabled INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE guild_settings ADD COLUMN music_youtube INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE guild_settings ADD COLUMN music_dj_role_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN music_channel_id INTEGER;
+    ALTER TABLE guild_settings ADD COLUMN music_idle_minutes INTEGER NOT NULL DEFAULT 5;
+    ALTER TABLE guild_settings ADD COLUMN music_volume INTEGER NOT NULL DEFAULT 60;
+    ALTER TABLE guild_settings ADD COLUMN music_stay INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 
@@ -449,6 +459,13 @@ class GuildSettings:
     parley_daily: int = 20
     parley_kagi_daily: int = 25
     ledger_reminders: int = 1
+    music_enabled: int = 1
+    music_youtube: int = 0
+    music_dj_role_id: int | None = None
+    music_channel_id: int | None = None
+    music_idle_minutes: int = 5
+    music_volume: int = 60
+    music_stay: int = 0
 
 
 @dataclass
@@ -517,7 +534,8 @@ class Boarding:
     reminded_at: str | None = None
 
 
-_SETTING_COLUMNS = {"ledger_reminders", "parley_enabled", "parley_budget_cents", "parley_daily", "parley_kagi_daily",
+_SETTING_COLUMNS = {"ledger_reminders", "music_enabled", "music_youtube", "music_dj_role_id", "music_channel_id",
+                    "music_idle_minutes", "music_volume", "music_stay", "parley_enabled", "parley_budget_cents", "parley_daily", "parley_kagi_daily",
                     "shipslog_channel_id", "shipslog_weekday", "shipslog_hour", "shipslog_last",
                     "crowsnest_enabled", "forum_channel_id", "gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
                     "rules_channel_id", "orientation_channel_id", "gangplank_alert_channel_id",

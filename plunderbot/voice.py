@@ -441,6 +441,59 @@ LINES: dict[str, list[str]] = {
     "no_permission": [
         "{cuss} That lever is for Quartermasters only, I'm afraid!",
     ],
+    # ------------------------------------------------------------ music (1.3.0)
+    "music_queued": [
+        "Aye! **{title}** is in the queue at number {position}.",
+        "Added **{title}** to the queue (number {position}). Hum along while you wait!",
+    ],
+    "music_queued_many": [
+        "Loaded {count} tracks from **{name}** into the queue!",
+        "Heave ho! {count} tracks from **{name}** are in the queue.",
+    ],
+    "music_now": [
+        "Now playing **{title}**!",
+        "Strike up the band: **{title}**!",
+    ],
+    "music_need_voice": [
+        "Hop into a voice channel first, and I'll bring the music to you!",
+    ],
+    "music_elsewhere": [
+        "{cuss} I'm already playing in {channel}. Join us there, or wait till that set's done.",
+    ],
+    "music_same_channel": [
+        "You'll need to be in {channel} with me to steer the music.",
+    ],
+    "music_dj_only": [
+        "{cuss} Only the DJs (or whoever asked for this track) can do that.",
+    ],
+    "music_cant_join": [
+        "{cuss} I can't join or speak in that voice channel. A Quartermaster needs to let me in.",
+    ],
+    "music_nothing": [
+        "Nothing's playing. Start something with `/play`!",
+    ],
+    "music_off": [
+        "Music is switched off on this server.",
+    ],
+    "music_skipped": ["Skipped **{title}**."],
+    "music_paused": ["Paused. `/music resume` (or the button) picks it back up."],
+    "music_resumed": ["And we're back!"],
+    "music_stopped": [
+        "Music stopped and the queue cleared. I'll tidy up my instruments.",
+        "That's a wrap! Queue cleared, and I'm off to polish the gramophone.",
+    ],
+    "music_left_idle": [
+        "Nobody's listening, so I've packed up the band. `/play` brings me back!",
+    ],
+    "music_queue_end": [
+        "That's the end of the queue! Add more with `/play`.",
+    ],
+    "music_failed_track": [
+        "{cuss} I couldn't play **{title}** ({reason}), so I've skipped it.",
+    ],
+    "music_queue_full": [
+        "{cuss} The queue's full to the gunwales. Let a few play first.",
+    ],
 }
 
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August",

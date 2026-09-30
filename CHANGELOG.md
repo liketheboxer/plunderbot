@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 (2026-09-30): Music
+
+- **Music in voice channels**, like Pancake: `/play` a song name or a link and PlunderBot joins your voice channel. `/music` has queue, nowplaying, skip, pause, resume, stop, leave, clear, remove, move, shuffle, repeat (off, this track, the whole queue), seek, volume (1 to 150%) and lyrics. A **Now Playing** card with pause, skip, stop, shuffle and repeat buttons goes up for each track. Volume and 24/7 are free.
+- Sources: SoundCloud, Bandcamp, Twitch, internet radio and plain audio links, plus Spotify links (with a Spotify key: the songs are found elsewhere, since Spotify never shares audio). **YouTube** is a Quartermaster's switch (`/admin music youtube`), played through a throwaway account's cookies (the `YOUTUBE_COOKIES` secret). Song names are searched on YouTube when it's on, SoundCloud when it's off.
+- Optional DJ role: with one set, skipping someone else's track, stop, clear, remove, move, shuffle, repeat, seek and volume need it, unless you're the only listener.
+- PlunderBot leaves after 5 quiet minutes (settable), unless 24/7 is on. `/admin music` has `status`, `enable`, `youtube`, `djrole`, `channel` and `settings`; the same settings are on Daisho's Settings screen.
+- Voice uses discord.py's own client with Discord's end-to-end encrypted voice (DAVE). New in the image: FFmpeg, libopus, yt-dlp (with its YouTube scripts) and Deno. Give the unit **1024 MB** of memory, and re-invite (or add **Connect** and **Speak** to PlunderBot's role) if it can't join voice.
+
 ## 1.2.0 (2026-09-30): Voyages and crews from the web
 
 Pairs with The Magical Samurai 1.15.0.

@@ -116,6 +116,9 @@ SETTINGS = {
     "shipslog_channel_id": ("text", 0, 0), "shipslog_weekday": ("int", 0, 6), "shipslog_hour": ("int", 0, 23),
     "parley_enabled": ("bool", 0, 1), "parley_budget_cents": ("int", 0, 1_000_000), "parley_daily": ("int", 0, 200),
     "ledger_reminders": ("bool", 0, 1),
+    "music_enabled": ("bool", 0, 1), "music_youtube": ("bool", 0, 1), "music_dj_role_id": ("role", 0, 0),
+    "music_channel_id": ("text", 0, 0), "music_idle_minutes": ("int", 1, 120), "music_volume": ("int", 1, 150),
+    "music_stay": ("bool", 0, 1),
 }
 LABELS = {"text": "text channel", "category": "category", "forum": "forum channel", "role": "role"}
 
@@ -302,6 +305,9 @@ class Daisho(commands.Cog):
         s["parley_spend"] = {"month": month, "dollars": round(dollars, 4), "calls": calls}
         s["has_anthropic"] = bool(self.bot.config.anthropic_api_key)
         s["can_read_messages"] = bool(getattr(self.bot, "can_read_messages", True))
+        music = self.bot.get_cog("Music")
+        s["music_has_cookies"] = bool(music and music.resolver.cookies)
+        s["music_has_spotify"] = bool(music and music.resolver.cfg.spotify)
         return s
 
     async def snap_articles(self, guild):

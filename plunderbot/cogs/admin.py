@@ -46,6 +46,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
     crowsnest = app_commands.Group(name="crowsnest", description="The Crow's Nest: game news in each game's thread")
     parley = app_commands.Group(name="parley", description="Parley: PlunderBot answering in chat")
     ledger = app_commands.Group(name="ledger", description="The Ship's Ledger: Sea of Thieves ships and plunder")
+    music = app_commands.Group(name="music", description="Music in voice channels")
 
     def __init__(self, bot):
         self.bot = bot
@@ -793,6 +794,78 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
 
 
     # ------------------------------------------------------------ the Ship's Ledger
+    # ------------------------------------------------------------ music (1.3.0)
+    @music.command(name="status", description="How music is set up")
+    async def music_status(self, interaction: discord.Interaction) -> None:
+        s = await self.bot.db.get_settings(interaction.guild_id)
+        cog = self.bot.get_cog("Music")
+        cfg = cog.resolver.cfg if cog else None
+        lines = [f"**Music is {'on' if s.music_enabled else 'off'}.**",
+                 f"YouTube: {'on' if s.music_youtube else 'off'}"
+                 + (" (with the throwaway account's cookies)" if cfg and cfg.cookies_b64 and cog.resolver.cookies
+                    else " (no YOUTUBE_COOKIES secret, so YouTube may turn it away)" if s.music_youtube else ""),
+                 f"Spotify links: {'on' if cfg and cfg.spotify else 'off (no SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET)'}",
+                 f"DJ role: {f'<@&{s.music_dj_role_id}>' if s.music_dj_role_id else 'none (anyone listening can steer)'}",
+                 f"Now Playing cards: {f'<#{s.music_channel_id}>' if s.music_channel_id else 'wherever /play is used'}",
+                 f"Starting volume: {s.music_volume}% · Leaves after {s.music_idle_minutes} minutes with nobody "
+                 f"listening or nothing playing · 24/7: {'on' if s.music_stay else 'off'}"]
+        await interaction.response.send_message("\n".join(lines), ephemeral=True,
+                                                allowed_mentions=discord.AllowedMentions.none())
+
+    @music.command(name="enable", description="Switch music on or off for the whole server")
+    async def music_enable(self, interaction: discord.Interaction, on: bool) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, music_enabled=int(on))
+        await interaction.response.send_message("Music is on: `/play` in a voice channel." if on else
+                                                "Music is off. Anything playing finishes its track.", ephemeral=True)
+
+    @music.command(name="youtube", description="Allow YouTube links and searches (uses a throwaway account)")
+    @app_commands.describe(on="Off: searches use SoundCloud, and YouTube links are turned away")
+    async def music_youtube(self, interaction: discord.Interaction, on: bool) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, music_youtube=int(on))
+        cog = self.bot.get_cog("Music")
+        note = ""
+        if on and cog and not cog.resolver.cookies:
+            note = (" There's no YOUTUBE_COOKIES secret yet, so YouTube will often turn PlunderBot away. Add a "
+                    "throwaway account's cookies in Exocomp and refit (see the README).")
+        await interaction.response.send_message(("YouTube is on: song names are searched on YouTube." + note) if on
+                                                else "YouTube is off: song names are searched on SoundCloud.",
+                                                ephemeral=True)
+
+    @music.command(name="djrole", description="Who can skip others' tracks, stop, clear, move, seek and change volume")
+    @app_commands.describe(role="Leave empty so anyone listening can")
+    async def music_djrole(self, interaction: discord.Interaction, role: discord.Role | None = None) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, music_dj_role_id=role.id if role else None)
+        await interaction.response.send_message(
+            f"DJ role: {role.mention}. Everyone can still /play, pause, and skip their own tracks." if role else
+            "No DJ role: anyone in the voice channel with PlunderBot can steer the music.", ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none())
+
+    @music.command(name="channel", description="Where Now Playing cards go")
+    @app_commands.describe(channel="Leave empty for wherever /play is used")
+    async def music_channel(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, music_channel_id=channel.id if channel else None)
+        await interaction.response.send_message(f"Now Playing cards go in {channel.mention}." if channel else
+                                                "Now Playing cards go wherever /play is used.", ephemeral=True)
+
+    @music.command(name="settings", description="Starting volume, when PlunderBot leaves, and 24/7")
+    @app_commands.describe(volume="Starting volume, 1 to 150 (%)",
+                           idle="Minutes with nothing playing or nobody listening before PlunderBot leaves",
+                           stay="24/7: stay in the voice channel even when it's quiet")
+    async def music_settings(self, interaction: discord.Interaction,
+                             volume: app_commands.Range[int, 1, 150] | None = None,
+                             idle: app_commands.Range[int, 1, 120] | None = None, stay: bool | None = None) -> None:
+        changes = {}
+        if volume is not None:
+            changes["music_volume"] = volume
+        if idle is not None:
+            changes["music_idle_minutes"] = idle
+        if stay is not None:
+            changes["music_stay"] = int(stay)
+        s = await self.bot.db.update_settings(interaction.guild_id, **changes)
+        await interaction.response.send_message(
+            f"Starting volume {s.music_volume}%, leaves after {s.music_idle_minutes} quiet minutes, "
+            f"24/7 {'on' if s.music_stay else 'off'}.", ephemeral=True)
+
     @ledger.command(name="reminders", description="Remind Sea of Thieves crews to screenshot and log their Captain's Log")
     @app_commands.describe(on="On: a nudge when a crew sets sail and when it's back in port")
     async def ledger_reminders(self, interaction: discord.Interaction, on: bool) -> None:

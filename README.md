@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.2.0 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho). The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.3.0 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho), plus **music** in voice channels. The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -27,6 +27,10 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/voyage edit` | Organizer or mod | Change the title, date, time, details, reminders, seats, picture (or remove it) or when the game's role is tagged |
 | `/voyage cancel` | Organizer or mod | Cancel one voyage, or with `whole_series:True` a repeating series |
 | `/voyage list` | Everyone | Upcoming voyages |
+| `/play` | Everyone in voice | Play a song name or a link in your voice channel (SoundCloud, Bandcamp, Twitch, radio, plain audio links, Spotify links, and YouTube when it's on). Playlists and albums load up to 50 tracks. `next:True` puts it at the front of the queue |
+| `/music queue` | Everyone | What's playing and what's next (10 a page). Also `nowplaying` (with how far in), `lyrics` (just for you) |
+| `/music skip` | Listeners | Skip. Also `pause`, `resume`. With a DJ role set, skipping someone else's track needs it |
+| `/music stop` | Listeners (DJ) | Stop, clear the queue and leave. Also `leave`, `clear`, `remove`, `move`, `shuffle`, `repeat` (off, this track, the whole queue), `seek` (1:30), `volume` (1 to 150%) |
 | `/admin settings` | Manage Server | Show this server's settings |
 | `/admin timezone` | Manage Server | Server time zone (default America/Los_Angeles) |
 | `/follow` | Everyone | Pick the games you follow: their ping roles, plus their threads in the game forum |
@@ -37,6 +41,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin crowsnest on` | Manage Server | Game news in each game's forum thread: `on`, `off`, `check`, `source` (Steam app, RSS/Atom feed, none or default), `preview` |
 | `/admin parley on` | Manage Server | Parley (PlunderBot answering in chat): `on`, `off`, `status` (spend and usage), `channel` (switch off in one channel), `limits` (monthly budget, replies per member a day, web searches a day) |
 | `/articles new` | Manage Server | The server's own rules: `new` (a name and a trigger), then what it does: `reply` (a pop-up list, one picked at random), `react`, `role` (give or take, optionally for a while), `count`, `repost`, `pin`. Also `edit`, `remove` (an action), `limits` (cooldown, chance, required role), `where` (channels), `on`, `off`, `show`, `list`, `delete` |
+| `/admin music status` | Manage Server | How music is set up. Also `enable`, `youtube` (on or off), `djrole`, `channel` (where Now Playing cards go), `settings` (starting volume, minutes before leaving when it's quiet, 24/7) |
 | `/admin ledger reminders` | Manage Server | Captain's Log nudges for Sea of Thieves crews at sail and back in port (on by default). `/admin ledger remove` takes a haul out by its entry number |
 | `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
@@ -51,6 +56,16 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin crew emoji` | Manage Server | Emoji for a game's crew cards and voice channels, for every size or one size (e.g. separate Sloop, Brigantine and Galleon emoji). Standard emoji or server emoji; `reset` restores the default |
 | `/admin crew pingrole` | Manage Server | Opt-in role pinged when a crew call opens for a game (at most every 15 minutes per game) |
 | `/admin voyages channel` | Manage Server | Where voyage cards are posted (e.g. #brimstone-events); empty = wherever `/voyage create` is used |
+
+### How music works
+
+- `/play` joins your voice channel and plays, or adds to the queue. A **Now Playing** card goes up where `/play` was used (or in the music channel from `/admin music channel`) with buttons: pause/resume, skip, stop, shuffle and repeat. Each new track replaces the card.
+- **Sources:** SoundCloud, Bandcamp, Twitch (live too), internet radio and plain audio links, through [yt-dlp](https://github.com/yt-dlp/yt-dlp) and FFmpeg. Song names are searched on SoundCloud, or on YouTube once it's on. **Spotify** only shares song details, never audio: with a Spotify key, a Spotify track, album or playlist becomes a list of songs that are found on YouTube (or SoundCloud) when their turn comes. Spotify's own editorial playlists are off limits to apps.
+- **YouTube** is off until a Quartermaster runs `/admin music youtube on`. Restreaming YouTube is against YouTube's terms, and YouTube turns away servers it thinks are bots, so PlunderBot signs in with a **throwaway** account's cookies (never a real account: YouTube can close accounts it thinks are automated). When YouTube refuses, the track is skipped with a note; everything else keeps working.
+- **Who steers:** anyone in the voice channel with PlunderBot, and anyone with Manage Channels. With a DJ role (`/admin music djrole`), skipping someone else's track, stop, clear, remove, move, shuffle, repeat, seek and volume need that role, unless you're the only one listening; you can always skip your own track.
+- PlunderBot leaves after 5 quiet minutes (nothing playing, or nobody listening), unless **24/7** is on. Tracks over 3 hours are turned away (live streams are fine). The queue holds 200.
+- Lyrics come from [LRCLIB](https://lrclib.net), an open lyrics database, and are shown only to whoever asks.
+- Voice uses discord.py's own client, which speaks Discord's end-to-end encrypted voice (DAVE); it needs the `davey` package, which `discord.py[voice]` brings.
 
 ### How Colours (role menus) work
 
@@ -149,7 +164,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application named **PlunderBot** and give it an avatar.
 2. **Bot** tab: turn on **Server Members Intent** and **Message Content Intent** (for importing old posts, Parley and Articles). Leave Presence off.
 3. **Bot** tab: **Reset Token** and keep the token for step 3. Never paste it in chat or commit it.
-4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**, **Kick Members**, **Read Message History**, **Add Reactions**, **Attach Files**, **Manage Threads**, **Manage Messages** (for articles that pin). Open the URL and add PlunderBot to Brimstone Hill Fortress.
+4. **OAuth2 › URL Generator**: scopes `bot` and `applications.commands`; permissions **View Channels**, **Send Messages**, **Embed Links**, **Manage Roles**, **Manage Channels**, **Manage Events**, **Kick Members**, **Read Message History**, **Add Reactions**, **Attach Files**, **Manage Threads**, **Manage Messages** (for articles that pin), **Connect** and **Speak** (for music). Open the URL and add PlunderBot to Brimstone Hill Fortress.
 5. In **Server Settings › Roles**, drag PlunderBot's role **above** any role it should hand out (the birthday role, the Colours roles, the Gangplank's Pending role, and any role an article gives).
 
 ### 2. GitHub
@@ -187,14 +202,29 @@ The Brimstone department must exist first (**Departments**, Captain only), and T
 | GitHub key | the key from step 2, if the repo is private |
 | How is it built? | Repo has its own Dockerfile |
 | Settings | `DEV_GUILD_ID=<Brimstone Hill's server ID>` for the first run (commands appear instantly); optional `DEFAULT_TIMEZONE`, `LOG_LEVEL` |
-| Secrets | `DISCORD_TOKEN=<the bot token>`; for Parley, `ANTHROPIC_API_KEY` (optional: `KAGI_API_KEY` for web search, `PARLEY_MODEL` setting, default `claude-haiku-4-5`) |
-| Memory limit | 512 MB |
+| Secrets | `DISCORD_TOKEN=<the bot token>`; for Parley, `ANTHROPIC_API_KEY` (optional: `KAGI_API_KEY` for web search, `PARLEY_MODEL` setting, default `claude-haiku-4-5`); for music, optionally `YOUTUBE_COOKIES`, `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` (see below) |
+| Memory limit | 1024 MB (music needs the room; 512 MB is enough without it) |
 
 Press **Fabricate unit** and watch the job log. SUCCESS means the health check passed, which only happens once PlunderBot has connected to Discord. Then, on the unit's **Chief and departments** page, name Twiddles as Chief.
 
 Exocomp supplies `EXOCOMP_URL` and `EXOCOMP_TELEMETRY_TOKEN`, so telemetry needs no setup; the unit's telemetry chip should read REPORTING within a minute. Without `DEV_GUILD_ID`, slash commands sync globally and can take a while to appear the first time.
 
 The bot keeps its database at `/data/plunderbot.db` and runs as user 10001. Exocomp's per-unit `/data` volume handles that; if the unit ever uses a host folder instead, that folder must be owned by 10001.
+
+### Music: the YouTube account and the Spotify key (optional)
+
+**YouTube cookies, from a throwaway account.** Never use your own Google account.
+
+1. Make a new Google account just for PlunderBot, and open YouTube with it once to accept the terms.
+2. Open a **private (incognito) window**, sign in to YouTube with that account, then go to `https://www.youtube.com/robots.txt` in the same tab. This keeps YouTube from swapping the session out from under PlunderBot.
+3. Export that window's cookies as a `cookies.txt` file (Netscape format) with a browser extension such as *Get cookies.txt LOCALLY*, then **close the private window without signing out**.
+4. Turn the file into one line of text in PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME\Downloads\cookies.txt")) | Set-Clipboard`
+5. In Exocomp, add the secret `YOUTUBE_COOKIES=<paste>` to the PlunderBot unit and refit. Delete the `cookies.txt` file.
+6. In Discord: `/admin music youtube on`. `/admin music status` shows whether the cookies were read.
+
+If YouTube starts refusing ("YouTube is turning PlunderBot away"), repeat steps 2 to 5 for fresh cookies.
+
+**Spotify key.** At [developer.spotify.com](https://developer.spotify.com/dashboard), create an app (any name; redirect URI `http://127.0.0.1/`, it isn't used), and copy its Client ID and Client Secret into the secrets `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`. Refit.
 
 ### 4. First run on the server
 

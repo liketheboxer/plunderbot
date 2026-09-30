@@ -8,7 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# FFmpeg plays the music (1.3.0); libopus is what Discord voice is encoded with.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg libopus0 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
+# yt-dlp[default] brings the scripts it needs for YouTube, and deno runs them
 RUN pip install -r requirements.txt
 
 COPY . .

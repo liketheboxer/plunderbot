@@ -34,7 +34,7 @@ async def bot(tmp_path):
 
 async def test_command_tree(bot):
     top = {c.name: c for c in bot.tree.get_commands()}
-    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage", "timezone", "colours", "noticeboard", "follow", "ship", "pirate", "articles"}
+    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage", "timezone", "colours", "noticeboard", "follow", "ship", "pirate", "articles", "play", "music"}
     arts = top["articles"]
     assert arts.guild_only and arts.default_permissions.manage_guild
     assert {c.name for c in arts.commands} == {"new", "edit", "reply", "react", "role", "count", "repost", "pin", "remove", "limits", "where", "on", "off", "delete", "list", "show"}
@@ -45,9 +45,13 @@ async def test_command_tree(bot):
     admin = top["admin"]
     assert isinstance(admin, app_commands.Group)
     assert admin.guild_only and admin.default_permissions.manage_guild
-    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages", "regions", "gangplank", "shipslog", "crowsnest", "parley", "ledger"}
+    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages", "regions", "gangplank", "shipslog", "crowsnest", "parley", "ledger", "music"}
     assert {c.name for c in admin.get_command("crew").commands} == {"channel", "category", "cleanup", "expire", "pingrole", "autopings", "emoji"}
     assert {c.name for c in top["crew"].commands} == {"start", "close", "list", "rename"}
+    assert {c.name for c in top["music"].commands} == {"queue", "nowplaying", "skip", "pause", "resume", "stop", "clear",
+                                                     "remove", "move", "shuffle", "repeat", "seek", "volume", "lyrics",
+                                                     "leave"}
+    assert top["music"].guild_only and top["play"].guild_only
     bday_admin = admin.get_command("birthdays")
     assert {c.name for c in bday_admin.commands} == {"channel", "hour", "role", "off"}
     birthday = top["birthday"]
