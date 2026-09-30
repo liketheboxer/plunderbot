@@ -69,6 +69,18 @@ TOOLS = [
     {"name": "plunderbot_commands",
      "description": "PlunderBot's slash commands and what each does.",
      "input_schema": {"type": "object", "properties": {}}},
+    {"name": "play_music",
+     "description": "Queue a song (or a playlist link) to play in the voice channel the person asking is in, as if "
+                    "they'd used /play. Use it when they ask you to play, queue or pick a song. If they want you to "
+                    "choose, pick one real, well-known song that fits and search for it as 'Artist - Title'. "
+                    "They must be in a voice channel; if the result says otherwise, tell them to hop in one.",
+     "input_schema": {"type": "object", "properties": {
+         "query": {"type": "string", "description": "What to search for, e.g. 'Alestorm - Keelhauled', or a link they gave."},
+         "next": {"type": "boolean", "description": "Put it at the front of the queue (only if they ask)."}},
+         "required": ["query"]}},
+    {"name": "music_queue",
+     "description": "What's playing in voice right now and what's next in the music queue.",
+     "input_schema": {"type": "object", "properties": {}}},
     {"name": "search_web",
      "description": "Search the live web for current facts: game updates, patch notes, release dates, "
                     "guides, anything outside this server. Costs money, so only use it when the answer "
@@ -86,6 +98,7 @@ Following games (ping role + forum thread): /follow, or the Follow games button 
 Ships (Sea of Thieves): /ship register, /ship edit, /ship retire, /ship show (a ship's profile), /ship fleet (richest ships and pirates). Pick your ship in /crew start.
 Logging a voyage's plunder: /ship log with a screenshot of the Captain's Log two-page spread, or just @mention PlunderBot (or reply to it) with the screenshot. PlunderBot reads it; the member presses Confirm or Edit before it's saved.
 Pirate profiles: /pirate profile, /pirate set (gamertag and motto).
+Music in voice channels: /play (a song name or a link), /music queue, /music nowplaying, /music skip, /music pause, /music resume, /music stop, /music shuffle, /music repeat, /music seek, /music volume, /music lyrics. The Now Playing card has buttons too.
 About PlunderBot: /plunderbot.
 Quartermasters manage settings with /admin, /colours (role menus), /noticeboard (pages) and /articles (the server's automatic replies and rules: when someone says a word, joins, gets a role, reacts, or on a schedule)."""
 
@@ -108,7 +121,7 @@ How you answer:
 - Keep it short: usually 1 to 4 sentences, never more than about 150 words. Discord markdown is fine; no headings.
 - For anything about this server (voyages, crews, birthdays, games, ships and plunder, rules, how things work, your own commands) use your tools; never guess server facts.
 - For current facts about games or the wider world, use search_web if you have it and you're not sure, and mention where it came from briefly.
-- You can't run commands or change anything yourself. Point people to the right slash command instead, always written in full (for example `/crew start`, never just `/crew`). Only ever name commands from this list; never invent one:
+- You can do a few things for the person asking, always as them and never for anyone else: queue music (play_music), plan a voyage (plan_voyage), answer a voyage's Aboard/Maybe/Can't make it (answer_voyage), cancel a voyage they organized (cancel_voyage), call a crew (start_crew), join or leave a crew (join_crew), and close their own crew (close_crew). Only do these when they clearly ask; if a voyage's date or time is missing or unclear, ask first. Look up numbers with upcoming_voyages or open_crews before answering or joining. Afterwards, say briefly what you did (with the time as a Discord timestamp and the card's link). Anything else, like editing a voyage, pictures, admin settings or acting for someone else, you can't do: point people to the right slash command instead, always written in full (for example `/crew start`, never just `/crew`). Only ever name commands from this list; never invent one:
 {COMMANDS_HELP}
 - You can't see pictures in this chat. If someone wants a Captain's Log screenshot logged, tell them to @mention you with the screenshot (no other words needed) or use `/ship log`.
 - If you don't know, say so cheerfully. Don't make things up.

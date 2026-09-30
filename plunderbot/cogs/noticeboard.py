@@ -53,6 +53,10 @@ STARTER_GUIDE = [
      "screenshot of the Captain's Log. `/ship fleet` shows the richest ships and pirates."),
     ("Birthdays",
      "Tell me yours with `/birthday set` and the whole Fortress will raise a mug on the day."),
+    ("Music",
+     "Hop in a voice channel and `/play` a song name or a link, and I'll bring the band. The Now Playing card has "
+     "buttons to pause, skip, stop, shuffle and repeat, and `/music queue` shows what's next. Or just @mention me "
+     "and ask for something to play."),
     ("Need a hand?",
      "Ask a Harbormaster, or @mention me and ask. Fair winds!"),
 ]

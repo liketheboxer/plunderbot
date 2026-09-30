@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.3.0 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho), plus **music** in voice channels. The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.3.1 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho), plus **music** in voice channels. The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -64,6 +64,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - **YouTube** is off until a Quartermaster runs `/admin music youtube on`. Restreaming YouTube is against YouTube's terms, and YouTube turns away servers it thinks are bots, so PlunderBot signs in with a **throwaway** account's cookies (never a real account: YouTube can close accounts it thinks are automated). When YouTube refuses, the track is skipped with a note; everything else keeps working.
 - **Who steers:** anyone in the voice channel with PlunderBot, and anyone with Manage Channels. With a DJ role (`/admin music djrole`), skipping someone else's track, stop, clear, remove, move, shuffle, repeat, seek and volume need that role, unless you're the only one listening; you can always skip your own track.
 - PlunderBot leaves after 5 quiet minutes (nothing playing, or nobody listening), unless **24/7** is on. Tracks over 3 hours are turned away (live streams are fine). The queue holds 200.
+- **Ask PlunderBot** (1.3.1): @mention it with "play something piratey" or "queue Wellerman next" and Parley picks and queues a song for you, with the same checks as `/play` (you must be in a voice channel). It can also tell you what's playing. It can't skip or stop; those stay with the buttons and `/music`.
 - Lyrics come from [LRCLIB](https://lrclib.net), an open lyrics database, and are shown only to whoever asks.
 - Voice uses discord.py's own client, which speaks Discord's end-to-end encrypted voice (DAVE); it needs the `davey` package, which `discord.py[voice]` brings.
 
@@ -86,6 +87,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 
 - @mention PlunderBot, or reply to one of its messages, and it answers in character. Replying keeps the conversation going (it sees up to six earlier messages in the reply chain).
 - Claude Haiku does the talking. Server facts (voyages, crews, birthdays, games and threads, the Notice Board pages, its own commands) come from PlunderBot's database, never guessed. Without a Kagi key (the current setup) it answers other questions from what Claude knows and says when that may be out of date; with `KAGI_API_KEY` set it can search the web, capped per day. Slash commands never use AI.
+- **It can do things for you** (1.3.1), always as you and never for anyone else, through the same code as the commands and buttons: plan a voyage ("plan a Sea of Thieves galleon run Friday at 8"), answer Aboard/Maybe/Can't make it, cancel a voyage you organized, call a crew ("start a sloop for fort"), join or leave a crew, close your own crew, and queue music. It asks when a voyage's date or time is missing. Editing voyages, pictures, settings and anything for other people stay with the slash commands. Newcomers still on the Gangplank can't use it.
 - Limits: a monthly dollar budget (default $5) and replies per member per day (default 20); with Kagi, also web searches per day (default 25, about 1.5¢ each, billed by Kagi). When a limit is hit, it says so in character.
 - It only answers in channels everyone can see, so staff channels are left out, and not to newcomers still on the gangplank. Quartermasters can switch it off per channel.
 - Set a spend limit in the Anthropic Console as well, as a backstop.
@@ -234,6 +236,8 @@ If YouTube starts refusing ("YouTube is turning PlunderBot away"), repeat steps 
 /admin birthdays hour 9
 /admin birthdays role @Birthday Pirate      (optional)
 /birthday set
+/admin music status                         (music: see "Music" above for YouTube and Spotify)
+/admin music youtube on                     (optional, once YOUTUBE_COOKIES is set)
 ```
 
 ## Telemetry

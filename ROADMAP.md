@@ -12,8 +12,17 @@
 | 8 | Articles: the server's own if-this-then-that rules (MEE6 is already gone; its old automations get remade as articles) | Done (0.9.0) |
 | 9 | Admin web module in The Magical Samurai (Daisho): Settings, Articles, Notice Board, Voyages, Crews, Ship's Ledger, Manage buttons on cards | Done (1.0.0, with The Magical Samurai 1.11.0) |
 
+## Since 1.0
+
+| Version | What |
+|---|---|
+| 1.0.1 | Daisho hardening from the security check |
+| 1.1.x | Role menus on Daisho (live preview, card colour, button words, head counts); onboarding wording; Gangplank roles never self-serve; Game Index threads linked by address |
+| 1.2.0 | Members plan voyages, call crews, answer and join from Daisho, as themselves (with The Magical Samurai 1.15.0; Swabbies came in 1.13.0) |
+| 1.3.0 | The jukebox: `/play`, `/music`, Now Playing card, DJ role, 24/7; YouTube through a throwaway account, Spotify links, SoundCloud, Bandcamp, Twitch, radio (with The Magical Samurai 1.16.0) |
+| 1.3.1 | Ask PlunderBot: Parley plans and answers voyages, calls and joins crews, and queues songs, in plain speech |
+
 ## Later
 
-- Region menu: add the new zone roles to the menu (steps 3 and 4 from Phase 4).
-- In Daisho: role menus (Colours), pictures on pages and articles, the emoji picker, new pages from scratch, and ship profiles with a Manage button.
-- Manage buttons for organizers and captains who aren't Daisho crew (needs a limited kind of sign-in on The Magical Samurai).
+- In Daisho: pictures on pages and articles, the emoji picker, new pages from scratch, ship profiles, and a Now Playing and queue screen for the jukebox.
+- Jukebox: saved playlists, and voting to skip.

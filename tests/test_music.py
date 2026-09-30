@@ -406,3 +406,25 @@ async def test_youtube_switch_follows_the_setting(music):
     await bot.db.update_settings(10, music_youtube=1)
     await cog.settings(10)
     assert cog.resolver.cfg.youtube is True
+
+
+async def test_parley_queues_songs_for_whoever_asked(music):
+    """1.3.1: "@PlunderBot pick me a pirate song" queues one, through the same checks as /play."""
+    bot, cog, guild, vch, txt = music
+    await bot.load_extension("plunderbot.cogs.parley")
+    parley = bot.get_cog("Parley")
+    s = await bot.db.get_settings(10)
+    away = member(5, None)
+    out = await parley.run_tool(guild, s, "play_music", {"query": "Alestorm - Keelhauled"}, "2026-09-30", away, txt)
+    assert out.startswith("It didn't work") and "voice channel" in out
+    boxer = member(1, vch)
+    out = await parley.run_tool(guild, s, "play_music", {"query": "Alestorm - Keelhauled"}, "2026-09-30", boxer, txt)
+    await settle()
+    assert out.startswith("Done") and cog.players[10].queue.current.title == "Alestorm - Keelhauled"
+    assert cog.players[10].queue.current.requester_id == 1
+    out = await parley.run_tool(guild, s, "play_music", {"query": "Wellerman", "next": True}, "2026-09-30", boxer, txt)
+    assert "number 1" in out or "Wellerman" in out
+    q = await parley.run_tool(guild, s, "music_queue", {}, "2026-09-30", boxer, txt)
+    assert "Now playing: Alestorm - Keelhauled" in q and "1. Wellerman" in q
+    from plunderbot.parley_logic import TOOLS
+    assert {"play_music", "music_queue"} <= {t["name"] for t in TOOLS}

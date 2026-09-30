@@ -127,7 +127,7 @@ async def env(tmp_path):
         await bot.load_extension(c)
     for name, loop in (("Birthdays", "announcer"), ("CrewCall", "upkeep"), ("Voyages", "clock"),
                        ("Gangplank", "upkeep"), ("ShipsLog", "clock"), ("CrowsNest", "watch"), ("Articles", "clock"),
-                       ("Daisho", "loop")):
+                       ("Daisho", "loop"), ("Music", "watch")):
         getattr(bot.get_cog(name), loop).cancel()
     cog = bot.get_cog("Daisho")
     cog.client = FakeClient()

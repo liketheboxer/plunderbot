@@ -21,6 +21,7 @@ from ..birthday_logic import upcoming, zone
 from ..discord_util import addressed_to
 from ..parley_logic import (COMMANDS_HELP, COOLDOWN_SECONDS, MAX_ROUNDS, TOOLS, build_messages, cost, refusal,
                             reply_text, safe, strip_bot_mention, system_prompt)
+from ..parley_actions import ACTION_NAMES, ACTION_TOOLS, act
 from ..voyage_logic import zone_from_name, zone_label
 
 log = logging.getLogger("plunderbot.parley")
@@ -34,6 +35,7 @@ class Parley(commands.Cog):
         self.kagi = Kagi(cfg.kagi_api_key) if cfg.kagi_api_key else None
         self.last_asked: dict[int, float] = {}
         self.lock = asyncio.Lock()  # one conversation at a time keeps spending predictable
+        self._background: set = set()
 
     async def cog_unload(self) -> None:
         for client in (self.claude, self.kagi):
@@ -116,13 +118,14 @@ class Parley(commands.Cog):
                                cusses=voice.CUSSES)
         messages = build_messages(history, question, author.display_name)
         async with message.channel.typing():
-            text = await self.converse(guild, s, system, messages, day, month)
+            text = await self.converse(guild, s, system, messages, day, month, author, message.channel)
         await message.reply(safe(text) or voice.say("parley_error"), mention_author=False,
                             allowed_mentions=discord.AllowedMentions.none())
         await self.bot.db.add_parley_reply(guild.id, author.id, day)
 
-    async def converse(self, guild, s, system: str, messages: list[dict], day: str, month: str) -> str:
-        tools = TOOLS if self.kagi else [t for t in TOOLS if t["name"] != "search_web"]
+    async def converse(self, guild, s, system: str, messages: list[dict], day: str, month: str,
+                       author=None, channel=None) -> str:
+        tools = (TOOLS if self.kagi else [t for t in TOOLS if t["name"] != "search_web"]) + ACTION_TOOLS
         for round_ in range(MAX_ROUNDS + 1):
             last = round_ == MAX_ROUNDS
             async with self.lock:
@@ -139,7 +142,8 @@ class Parley(commands.Cog):
                 if block.get("type") != "tool_use":
                     continue
                 try:
-                    out = await self.run_tool(guild, s, block.get("name"), block.get("input") or {}, day)
+                    out = await self.run_tool(guild, s, block.get("name"), block.get("input") or {}, day,
+                                              author, channel)
                 except Exception as e:
                     log.warning("Parley tool %s failed: %s", block.get("name"), e)
                     out = f"That didn't work: {e}"
@@ -174,8 +178,28 @@ class Parley(commands.Cog):
                  + (f", {v} voyage(s) planned" if v else "") for n, c, p, f, v in rows]
         return "Busiest first:\n" + "\n".join(lines)
 
-    async def run_tool(self, guild: discord.Guild, s, name: str, args: dict, day: str) -> str:
+    async def run_tool(self, guild: discord.Guild, s, name: str, args: dict, day: str, author=None,
+                       channel=None) -> str:
         db = self.bot.db
+        if name in ACTION_NAMES:
+            return await act(self.bot, guild, author, channel, name, args)
+        if name in ("play_music", "music_queue"):
+            music = self.bot.get_cog("Music")
+            if music is None:
+                return "Music isn't running."
+            if name == "music_queue":
+                return music.summary(guild.id)
+            if author is None:
+                return "You can only queue music for someone who asked."
+            query = " ".join(str(args.get("query") or "").split())[:200]
+            if not query:
+                return "Say what to play."
+            ok, text, start = await music.enqueue(guild, author, channel, query, bool(args.get("next")))
+            if ok and start:   # start playing without holding up the reply
+                task = asyncio.create_task(music.advance(guild, music.players[guild.id]))
+                self._background.add(task)
+                task.add_done_callback(self._background.discard)
+            return ("Done: " if ok else "It didn't work: ") + text
         now = datetime.now(timezone.utc)
         if name == "upcoming_voyages":
             from ..crew_logic import iso
@@ -190,7 +214,7 @@ class Parley(commands.Cog):
                 game = games.get(v.game_key).name if games.get(v.game_key) else "server event"
                 link = f"https://discord.com/channels/{v.guild_id}/{v.channel_id}/{v.message_id}" if v.message_id else ""
                 stamp = int(datetime.fromisoformat(v.starts_at).timestamp())
-                lines.append(f"- {v.title} ({game}) at <t:{stamp}:F>, organized by <@{v.organizer_id}>, {seats} {link}")
+                lines.append(f"- #{v.id} {v.title} ({game}) at <t:{stamp}:F>, organized by <@{v.organizer_id}>, {seats} {link}")
             return "\n".join(lines)
         if name == "open_crews":
             crews = await db.active_crews(guild.id)
@@ -200,7 +224,7 @@ class Parley(commands.Cog):
             for c in crews[:15]:
                 g = games.get(c.game_key)
                 link = f"https://discord.com/channels/{c.guild_id}/{c.channel_id}/{c.message_id}" if c.message_id else ""
-                lines.append(f"- {g.name if g else c.game_key} {c.size_label}, captain <@{c.captain_id}>, "
+                lines.append(f"- #{c.id} {g.name if g else c.game_key} {c.size_label}, captain <@{c.captain_id}>, "
                              f"{len(c.members)}/{c.capacity} aboard, {c.status} {link}")
             return "\n".join(lines)
         if name == "upcoming_birthdays":

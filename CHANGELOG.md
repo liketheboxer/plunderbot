@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 (2026-09-30): Ask PlunderBot to do things
+
+- Parley can now act for the member who asked, in plain speech, through the same code as the commands and buttons: **plan a voyage** ("plan a Sea of Thieves galleon run Friday at 8"), **answer** a voyage (Aboard, Maybe, Can't make it, or take it back), **cancel** a voyage they organized, **call a crew** ("start a sloop for fort"), **join or leave** a crew, and **close** their own crew. It asks when a voyage's date or time is missing, reads times in the member's own time zone (as `/voyage create` does) and says which zone it used. It never acts for anyone else, and members still on the Gangplank can't use it. Voyage and crew lists it reads now carry their numbers (#12) so it can pick the right one.
+- Parley can queue music: "@PlunderBot pick me a song about pirates" and it chooses one and adds it to the queue, as if you'd used `/play` (same checks: you must be in a voice channel, and the usual queue limits). It can also say what's playing and what's next. Skipping and stopping stay with the buttons and `/music`.
+- Parley now knows the music commands, so it points people to `/play` and `/music` correctly.
+- `/noticeboard starter`'s draft Pirate's Guide has a Music section.
+
 ## 1.3.0 (2026-09-30): Music
 
 - **Music in voice channels**, like Pancake: `/play` a song name or a link and PlunderBot joins your voice channel. `/music` has queue, nowplaying, skip, pause, resume, stop, leave, clear, remove, move, shuffle, repeat (off, this track, the whole queue), seek, volume (1 to 150%) and lyrics. A **Now Playing** card with pause, skip, stop, shuffle and repeat buttons goes up for each track. Volume and 24/7 are free.

@@ -189,34 +189,43 @@ class Music(commands.Cog):
         await self.play(interaction, song, next)
 
     async def play(self, interaction: discord.Interaction, query: str, front: bool = False) -> None:
-        guild, member = interaction.guild, interaction.user
+        async def thinking():
+            await interaction.response.defer(thinking=True)
+        ok, text, start = await self.enqueue(interaction.guild, interaction.user, interaction.channel, query,
+                                             front, on_resolving=thinking)
+        if not ok:
+            await self.reply(interaction, text)
+            return
+        await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none())
+        if start:
+            await self.advance(interaction.guild, self.players[interaction.guild.id])
+
+    async def enqueue(self, guild: discord.Guild, member, channel, query: str, front: bool = False,
+                      on_resolving=None) -> tuple[bool, str, bool]:
+        """Queue a song (or playlist) for a member, joining their voice channel. Used by /play and by Parley
+        ("play me a pirate song"). (whether it worked, what to tell them, whether the caller should start it)"""
         s = await self.settings(guild.id)
         if not s.music_enabled:
-            await self.reply(interaction, voice.say("music_off"))
-            return
+            return False, voice.say("music_off"), False
         target = getattr(getattr(member, "voice", None), "channel", None)
         if target is None:
-            await self.reply(interaction, voice.say("music_need_voice"))
-            return
+            return False, voice.say("music_need_voice"), False
         vc = guild.voice_client
         p = self.player(guild.id, s.music_volume)
         busy = vc is not None and (p.queue.current is not None or p.queue.tracks)
         if vc is not None and vc.channel.id != target.id and busy and not _is_mod(member):
-            await self.reply(interaction, voice.say("music_elsewhere", channel=vc.channel.mention))
-            return
+            return False, voice.say("music_elsewhere", channel=vc.channel.mention), False
         perms = target.permissions_for(guild.me)
         if not (perms.connect and perms.speak):
-            await self.reply(interaction, voice.say("music_cant_join"))
-            return
+            return False, voice.say("music_cant_join"), False
         if len(p.queue.tracks) >= MAX_QUEUE:
-            await self.reply(interaction, voice.say("music_queue_full"))
-            return
-        await interaction.response.defer(thinking=True)
+            return False, voice.say("music_queue_full"), False
+        if on_resolving is not None:
+            await on_resolving()
         try:
             tracks, name = await self.resolver.resolve(query, member.id)
         except ResolveError as e:
-            await interaction.followup.send(f"{voice.cuss(None)} {e}", ephemeral=True)
-            return
+            return False, f"{voice.cuss(None)} {e}", False
         try:
             if vc is None:
                 vc = await target.connect(self_deaf=True, timeout=20)
@@ -224,12 +233,11 @@ class Music(commands.Cog):
                 await vc.move_to(target)
         except (discord.ClientException, asyncio.TimeoutError, discord.HTTPException) as e:
             log.warning("Couldn't join voice channel %s: %s", target.id, e)
-            await interaction.followup.send(voice.say("music_cant_join"), ephemeral=True)
-            return
+            return False, voice.say("music_cant_join"), False
         p.stopping = False
         p.idle_since = None
         music_channel = guild.get_channel(s.music_channel_id) if s.music_channel_id else None
-        p.text_channel_id = (music_channel or interaction.channel).id
+        p.text_channel_id = (music_channel or channel).id
         if front:
             added = min(len(tracks), MAX_QUEUE - len(p.queue.tracks))
             p.queue.tracks[0:0] = tracks[:added]
@@ -244,9 +252,19 @@ class Music(commands.Cog):
             text = voice.say("music_now", title=tracks[0].title)
         else:
             text = voice.say("music_queued", title=tracks[0].title, position=position)
-        await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none())
-        if idle:
-            await self.advance(guild, p)
+        return True, text, idle
+
+    def summary(self, guild_id: int, upcoming: int = 5) -> str:
+        """What's playing and what's next, for Parley."""
+        p = self.players.get(guild_id)
+        if p is None or p.queue.current is None:
+            return "Nothing is playing. Members start music with /play in a voice channel."
+        t = p.queue.current
+        lines = [f"Now playing: {t.title} ({clock(p.position())} of {clock(t.duration)}), asked for by <@{t.requester_id}>"]
+        lines += [f"{i}. {x.title}" for i, x in enumerate(p.queue.tracks[:upcoming], 1)]
+        if len(p.queue.tracks) > upcoming:
+            lines.append(f"...and {len(p.queue.tracks) - upcoming} more")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------ playing
     async def advance(self, guild: discord.Guild, p: Player, skipped: bool = False) -> None:
