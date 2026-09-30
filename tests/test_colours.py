@@ -122,8 +122,14 @@ def interaction(guild, user):
     async def follow(content=None, **kw):
         followups.append(content)
 
-    return SimpleNamespace(guild=guild, guild_id=guild.id, user=user, response=Response(),
-                           followup=SimpleNamespace(send=follow, sent=followups), channel=None)
+    response = Response()
+
+    async def edit_original(**kw):
+        response.edited.append(kw)
+
+    return SimpleNamespace(guild=guild, guild_id=guild.id, user=user, response=response,
+                           followup=SimpleNamespace(send=follow, sent=followups), channel=None,
+                           edit_original_response=edit_original)
 
 
 @pytest.fixture

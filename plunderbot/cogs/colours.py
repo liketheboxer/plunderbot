@@ -16,7 +16,7 @@ from discord.ext import commands
 
 from .. import voice
 from ..db import RoleMenu
-from ..discord_util import fetch_linked, self_serve_problem
+from ..discord_util import fetch_linked, finish, self_serve_problem
 from ..menu_logic import (MAX_OPTIONS, first_emoji, infer_role, match_role_by_name, parse_lines,
                           partial_emoji, plan, render_menu, slug)
 from ..region_logic import broad_zones_for
@@ -131,20 +131,21 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
 
     async def apply(self, interaction: discord.Interaction, menu_id: int, chosen: list[int]) -> None:
         guild, member = interaction.guild, interaction.user
+        await interaction.response.defer()  # Discord allows 3 seconds; role changes can take longer
         menu = await self.bot.db.get_menu(menu_id)
         if menu is None:
-            await interaction.response.edit_message(content=voice.say("colours_gone"), view=None)
+            await finish(interaction, content=voice.say("colours_gone"), view=None)
             return
         live = [o.role_id for o in menu.options if guild.get_role(o.role_id) is not None]
         add, remove = plan({r.id for r in member.roles}, live, chosen, menu.mode)
         if not add and not remove:
-            await interaction.response.edit_message(content=voice.say("colours_same"), view=None)
+            await finish(interaction, content=voice.say("colours_same"), view=None)
             return
         add_roles = [guild.get_role(r) for r in add]
         remove_roles = [guild.get_role(r) for r in remove]
         me = guild.me
         if any(self_serve_problem(r, me) for r in add_roles + remove_roles):
-            await interaction.response.edit_message(content=voice.say("colours_cant"), view=None)
+            await finish(interaction, content=voice.say("colours_cant"), view=None)
             return
         try:
             if remove_roles:
@@ -153,7 +154,7 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
                 await member.add_roles(*add_roles, reason=f"Colours: {menu.title}")
         except discord.HTTPException as e:
             log.warning("Couldn't change %s's roles from menu %s: %s", member.id, menu.id, e)
-            await interaction.response.edit_message(content=voice.say("colours_cant"), view=None)
+            await finish(interaction, content=voice.say("colours_cant"), view=None)
             return
         parts = []
         if add_roles:
@@ -163,10 +164,10 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
         text = voice.say("colours_done", changes=" ".join(parts))
         zones = await self.broad_zones(guild, member, add_roles)
         if zones:
-            await interaction.response.edit_message(content=text + "\n\n" + voice.say("colours_zone_prompt"),
+            await finish(interaction, content=text + "\n\n" + voice.say("colours_zone_prompt"),
                                                     view=ZonePicker(self, zones))
         else:
-            await interaction.response.edit_message(content=text, view=None)
+            await finish(interaction, content=text, view=None)
 
     async def broad_zones(self, guild: discord.Guild, member, added: list[discord.Role]) -> list[tuple[str, str]]:
         """If they just picked a region too broad for one zone (and haven't chosen a zone themselves),
@@ -187,11 +188,11 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
         from ..voyage_logic import zone_from_name, zone_label
         tz = zone_from_name(zone)
         if tz is None:
-            await interaction.response.edit_message(content=voice.say("tz_unknown", zone=zone), view=None)
+            await finish(interaction, content=voice.say("tz_unknown", zone=zone), view=None)
             return
         await self.bot.db.set_member_timezone(interaction.user.id, tz.key, "manual")
         now = datetime.now(timezone.utc)
-        await interaction.response.edit_message(content=voice.say(
+        await finish(interaction, content=voice.say(
             "tz_saved", zone=zone_label(tz, now), local=now.astimezone(tz).strftime("%-I:%M %p")), view=None)
 
     async def onboarding_items(self, guild: discord.Guild) -> list[discord.ui.Item]:

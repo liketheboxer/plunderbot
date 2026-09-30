@@ -43,3 +43,11 @@ async def fetch_linked(guild: discord.Guild, link: str) -> discord.Message | Non
         return await channel.fetch_message(parsed[2])
     except discord.HTTPException:
         return None
+
+
+async def finish(interaction: discord.Interaction, **kw) -> None:
+    """Update the private message a menu came from, whether or not the click was deferred first."""
+    if interaction.response.is_done():
+        await interaction.edit_original_response(**kw)
+    else:
+        await interaction.response.edit_message(**kw)

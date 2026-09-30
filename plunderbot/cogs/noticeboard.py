@@ -9,6 +9,7 @@ and a Follow button. Following a game gives its ping role and adds you to its fo
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -18,7 +19,7 @@ from discord.ext import commands
 
 from .. import crew_emoji, games, images, voice
 from ..db import Page, PageSection
-from ..discord_util import fetch_linked, self_serve_problem
+from ..discord_util import fetch_linked, finish, self_serve_problem
 from ..menu_logic import partial_emoji, plan, slug
 from ..page_logic import (BODY_MAX, HEADING_MAX, chunk_lines, colour_text, game_index_lines, image_filename,
                           layout, parse_colour, plan_sections, render_section, split_parts)
@@ -134,6 +135,7 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
 
     def __init__(self, bot):
         self.bot = bot
+        self._background: set = set()
         super().__init__()
 
     async def cog_load(self) -> None:
@@ -577,8 +579,8 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
             pass
         return threads
 
-    async def game_entries(self, guild: discord.Guild) -> list[dict]:
-        threads = await self.forum_threads(guild)
+    async def game_entries(self, guild: discord.Guild, with_threads: bool = True) -> list[dict]:
+        threads = await self.forum_threads(guild) if with_threads else []
         roles = await self.bot.db.game_ping_roles(guild.id)
         overrides = await self.bot.db.crew_emoji(guild.id)
         out = []
@@ -639,7 +641,7 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
         await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
 
     async def open_follow(self, interaction: discord.Interaction) -> None:
-        entries = [e for e in await self.game_entries(interaction.guild) if e["role_id"]]
+        entries = [e for e in await self.game_entries(interaction.guild, with_threads=False) if e["role_id"]]
         if not entries:
             await interaction.response.send_message(voice.say("colours_gone"), ephemeral=True)
             return
@@ -653,17 +655,18 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
 
     async def apply_follow(self, interaction: discord.Interaction, chosen_keys: list[str]) -> None:
         guild, member = interaction.guild, interaction.user
-        entries = [e for e in await self.game_entries(guild) if e["role_id"]]
+        await interaction.response.defer()  # Discord allows 3 seconds; this can take longer
+        entries = [e for e in await self.game_entries(guild, with_threads=False) if e["role_id"]]
         by_role = {e["role_id"]: e for e in entries}
         chosen = [e["role_id"] for e in entries if e["key"] in chosen_keys]
         add, remove = plan({r.id for r in member.roles}, list(by_role), chosen, "multi")
         if not add and not remove:
-            await interaction.response.edit_message(content=voice.say("colours_same"), view=None)
+            await finish(interaction, content=voice.say("colours_same"), view=None)
             return
         add_roles = [guild.get_role(r) for r in add]
         remove_roles = [guild.get_role(r) for r in remove]
         if any(self_serve_problem(r, guild.me) for r in add_roles + remove_roles):
-            await interaction.response.edit_message(content=voice.say("colours_cant"), view=None)
+            await finish(interaction, content=voice.say("colours_cant"), view=None)
             return
         try:
             if remove_roles:
@@ -671,10 +674,23 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
             if add_roles:
                 await member.add_roles(*add_roles, reason="Followed a game")
         except discord.HTTPException:
-            await interaction.response.edit_message(content=voice.say("colours_cant"), view=None)
+            await finish(interaction, content=voice.say("colours_cant"), view=None)
             return
-        for rid in add + remove:  # threads are a bonus; roles are what matter
-            thread = by_role[rid].get("thread")
+        parts = []
+        if add:
+            parts.append("Following " + voice.join_names([by_role[r]["name"] for r in add]) + ".")
+        if remove:
+            parts.append("Stopped following " + voice.join_names([by_role[r]["name"] for r in remove]) + ".")
+        await finish(interaction, content=voice.say("follow_done", changes=" ".join(parts)), view=None)
+        # Threads are a bonus, and slow one at a time, so they're sorted after the reply.
+        task = asyncio.create_task(self.update_threads(guild, member, add, remove))
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def update_threads(self, guild: discord.Guild, member, add: list[int], remove: list[int]) -> None:
+        entries = {e["role_id"]: e for e in await self.game_entries(guild) if e["role_id"]}
+        for rid in add + remove:
+            thread = entries.get(rid, {}).get("thread")
             if thread is None:
                 continue
             try:
@@ -684,12 +700,6 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
                     await thread.remove_user(member)
             except discord.HTTPException as e:
                 log.info("Couldn't update %s in thread %s: %s", member.id, thread.id, e)
-        parts = []
-        if add:
-            parts.append("Following " + voice.join_names([by_role[r]["name"] for r in add]) + ".")
-        if remove:
-            parts.append("Stopped following " + voice.join_names([by_role[r]["name"] for r in remove]) + ".")
-        await interaction.response.edit_message(content=voice.say("follow_done", changes=" ".join(parts)), view=None)
 
     async def onboarding_items(self, guild: discord.Guild) -> list[discord.ui.Item]:
         roles = await self.bot.db.game_ping_roles(guild.id)

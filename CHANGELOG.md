@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.5 (2026-09-29): Faster pickers
+
+- Follow games and role-menu pickers answer Discord straight away, so picking many at once no longer times out ("PlunderBot didn't respond in time"). Joining and leaving game threads happens just after the reply.
+
 ## 0.5.4 (2026-09-29): Importing MEE6 role menus
 
 - `/colours import` reads menus that list role names instead of mentioning roles (as MEE6's do). Each line's role is found by its name, or, if the role has been renamed since, by the role most of the people who reacted with that emoji wear.

@@ -263,10 +263,16 @@ async def test_follow_and_unfollow(index_env):
     await cog.open_follow(inter)
     options = inter.response.sent[0][1]["view"].select.options
     assert [o.value for o in options] == ["sot", "fortnite"]
-    await cog.apply_follow(interaction(guild, member), ["sot", "fortnite"])
-    assert {r.id for r in member.roles} == {R + 1, R + 2} and 1 in sot.users and 1 in fort.users
+    import asyncio
+    first = interaction(guild, member)
+    await cog.apply_follow(first, ["sot", "fortnite"])
+    assert first.response.deferred  # acknowledged straight away, so Discord never times out
+    assert {r.id for r in member.roles} == {R + 1, R + 2}
+    await asyncio.gather(*cog._background)  # threads are sorted after the reply
+    assert 1 in sot.users and 1 in fort.users
     done = interaction(guild, member)
     await cog.apply_follow(done, ["fortnite"])
+    await asyncio.gather(*cog._background)
     assert {r.id for r in member.roles} == {R + 2} and 1 not in sot.users
     assert "Stopped following Sea of Thieves" in done.response.edited[0]["content"]
 
