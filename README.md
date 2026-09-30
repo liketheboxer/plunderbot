@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 0.8.0 covers **phases 1 to 7 of 9**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, and the Ship's Ledger. The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 0.9.0 covers **phases 1 to 8 of 9**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, and Articles. The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -36,6 +36,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/admin shipslog channel` | Manage Server | The weekly Ship's Log roundup: `channel` (empty turns it off), `when` (day and hour), `preview`, `post` |
 | `/admin crowsnest on` | Manage Server | Game news in each game's forum thread: `on`, `off`, `check`, `source` (Steam app, RSS/Atom feed, none or default), `preview` |
 | `/admin parley on` | Manage Server | Parley (PlunderBot answering in chat): `on`, `off`, `status` (spend and usage), `channel` (switch off in one channel), `limits` (monthly budget, replies per member a day, web searches a day) |
+| `/articles new` | Manage Server | The server's own rules: `new` (a name and a trigger), then what it does: `reply` (a pop-up list, one picked at random), `react`, `role` (give or take, optionally for a while), `count`, `repost`, `pin`. Also `edit`, `remove` (an action), `limits` (cooldown, chance, required role), `where` (channels), `on`, `off`, `show`, `list`, `delete` |
 | `/admin ledger reminders` | Manage Server | Captain's Log nudges for Sea of Thieves crews at sail and back in port (on by default). `/admin ledger remove` takes a haul out by its entry number |
 | `/admin regions auto` | Manage Server | Match region roles to time zones by name and update members. Also `set` (one role → a zone), `clear` and `list` |
 | `/admin birthdays channel` | Manage Server | Where toasts are posted; this turns toasts on |
@@ -73,6 +74,15 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - Limits: a monthly dollar budget (default $5) and replies per member per day (default 20); with Kagi, also web searches per day (default 25, about 1.5¢ each, billed by Kagi). When a limit is hit, it says so in character.
 - It only answers in channels everyone can see, so staff channels are left out, and not to newcomers still on the gangplank. Quartermasters can switch it off per channel.
 - Set a spend limit in the Anthropic Console as well, as a backstop.
+
+### How Articles work
+
+- An article is a rule: **when** something happens, PlunderBot **does** one or more things, within **limits**.
+- When: someone says words or phrases (whole word, anywhere, the whole message, or the start), a member joins, leaves, gets or loses a role, or boosts, a message gets an emoji reaction (optionally only once it has several, like a starboard), or on a schedule in server time (`every 6h`, `daily 8pm`, `weekdays 9am`, `mon,fri 20:00`).
+- Does: reply, or post in a chosen channel (a random pick from a list, separated in the form by a line with just `---`, with an optional picture); react; give or take a role, for good or for some minutes; count (per member or server-wide); repost the message in another channel; pin it. Reacting, pinning and reposting need a message, so they work with word and reaction triggers only; joins, leaves, role changes, boosts and schedules post in a channel.
+- Replies can use `{member}` (pings them), `{name}` (doesn't), `{author}` (who wrote a reacted message), `{count}` and `{nth}` (1st, 2nd…), `{server}`, `{channel}`, `{role}` and `{cuss}`.
+- Limits: a cooldown per channel, per member or server-wide (word triggers start at 60 seconds per channel), a chance (fires 30% of the time, say), a required role, and which channels it works in (a category covers its channels). PlunderBot ignores other bots, so articles can't set each other off.
+- Word triggers need the Message Content Intent, which is on.
 
 ### How the Ship's Ledger works
 
@@ -212,8 +222,9 @@ With `DEV_GUILD_ID` set, commands sync to that one server instantly instead of g
 | `plunderbot/birthday_logic.py` | Date rules: leap days, next birthday, when to toast, change limits |
 | `plunderbot/games.py` | The game profiles |
 | `plunderbot/crew_logic.py` | Crew Call rules and the crew card |
+| `plunderbot/articles_logic.py` | Articles: matching words, schedules, reply templates, which actions fit which trigger |
 | `plunderbot/ledger_logic.py` | The Ship's Ledger: reading a Captain's Log, profiles and hauls |
-| `plunderbot/cogs/` | Features: `core`, `admin`, `birthdays`, `crew`, `voyages`, `regions`, `gangplank`, `colours`, `noticeboard`, `shipslog`, `crowsnest`, `parley`, `ledger` |
+| `plunderbot/cogs/` | Features: `core`, `admin`, `birthdays`, `crew`, `voyages`, `regions`, `gangplank`, `colours`, `noticeboard`, `shipslog`, `crowsnest`, `parley`, `ledger`, `articles` |
 | `exocomp_telemetry.py` | Exocomp's telemetry helper, vendored |
 
 ## Rules of the ship

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 (2026-09-29): Articles
+
+Phase 8.
+
+- `/articles`: the server's own if-this-then-that rules, for Quartermasters.
+- Triggers: words or phrases (whole word, anywhere, exact, or at the start), a member joining, leaving, getting or losing a role, or boosting, an emoji reaction (optionally once a message has several, for a starboard), or a schedule in server time.
+- Actions: reply or post (picked at random from a list, with an optional picture), react, give or take a role (optionally for a while), count (per member or server-wide, for `{count}` and `{nth}`), repost in another channel, pin. Up to 8 per article.
+- Limits: cooldown per channel, member or server; chance; a required role; which channels (categories count).
+- Replies can use `{member}`, `{name}`, `{author}`, `{count}`, `{nth}`, `{server}`, `{channel}`, `{role}`, `{cuss}`.
+- Parley knows about `/articles`. Database migration 17.
+
 ## 0.8.1 (2026-09-29): Hand PlunderBot your Captain's Log
 
 - Reply to PlunderBot (or @mention it) with a Captain's Log screenshot and it reads it right there: no words needed, or words like "here are my stats". The reading gets Confirm / Edit / Cancel buttons that only the poster can press; confirmed, that message becomes the ledger entry.

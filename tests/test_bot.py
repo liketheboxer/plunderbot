@@ -27,13 +27,17 @@ async def bot(tmp_path):
     b.get_cog("Gangplank").upkeep.cancel()
     b.get_cog("ShipsLog").clock.cancel()
     b.get_cog("CrowsNest").watch.cancel()
+    b.get_cog("Articles").clock.cancel()
     yield b
     await b.db.close()
 
 
 async def test_command_tree(bot):
     top = {c.name: c for c in bot.tree.get_commands()}
-    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage", "timezone", "colours", "noticeboard", "follow", "ship", "pirate"}
+    assert set(top) == {"plunderbot", "admin", "birthday", "crew", "voyage", "timezone", "colours", "noticeboard", "follow", "ship", "pirate", "articles"}
+    arts = top["articles"]
+    assert arts.guild_only and arts.default_permissions.manage_guild
+    assert {c.name for c in arts.commands} == {"new", "edit", "reply", "react", "role", "count", "repost", "pin", "remove", "limits", "where", "on", "off", "delete", "list", "show"}
     assert {c.name for c in top["ship"].commands} == {"register", "edit", "retire", "show", "fleet", "log"}
     assert {c.name for c in top["pirate"].commands} == {"profile", "set"}
     assert top["ship"].guild_only and top["pirate"].guild_only

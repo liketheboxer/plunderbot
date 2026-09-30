@@ -353,6 +353,48 @@ MIGRATIONS: list[str] = [
     );
     ALTER TABLE guild_settings ADD COLUMN ledger_reminders INTEGER NOT NULL DEFAULT 1;
     """,
+    # 17: Articles, the server's own if-this-then-that rules
+    """
+    CREATE TABLE articles (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id       INTEGER NOT NULL,
+        name           TEXT NOT NULL,
+        enabled        INTEGER NOT NULL DEFAULT 1,
+        trigger        TEXT NOT NULL,
+        value          TEXT,
+        match          TEXT NOT NULL DEFAULT 'word',
+        threshold      INTEGER NOT NULL DEFAULT 1,
+        channels       TEXT NOT NULL DEFAULT '[]',
+        only_role_id   INTEGER,
+        cooldown       INTEGER NOT NULL DEFAULT 60,
+        cooldown_scope TEXT NOT NULL DEFAULT 'channel',
+        chance         INTEGER NOT NULL DEFAULT 100,
+        actions        TEXT NOT NULL DEFAULT '[]',
+        created_by     INTEGER NOT NULL,
+        created_at     TEXT NOT NULL,
+        next_run       TEXT
+    );
+    CREATE UNIQUE INDEX articles_name ON articles (guild_id, name COLLATE NOCASE);
+    CREATE TABLE article_counts (
+        article_id INTEGER NOT NULL REFERENCES articles (id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL,  -- 0 for a server-wide count
+        count      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (article_id, user_id)
+    );
+    CREATE TABLE article_fired (
+        article_id INTEGER NOT NULL REFERENCES articles (id) ON DELETE CASCADE,
+        message_id INTEGER NOT NULL,
+        PRIMARY KEY (article_id, message_id)
+    );
+    CREATE TABLE article_role_timers (
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        role_id  INTEGER NOT NULL,
+        until    TEXT NOT NULL,
+        mode     TEXT NOT NULL,  -- add: take it back off at `until`; remove: give it back
+        PRIMARY KEY (guild_id, user_id, role_id)
+    );
+    """,
 ]
 
 
@@ -580,6 +622,9 @@ class ShipLog:
     message_id: int | None
     pirates: list[int] = field(default_factory=list)
 
+
+_ARTICLE_COLUMNS = {"name", "enabled", "trigger", "value", "match", "threshold", "channels", "only_role_id",
+                    "cooldown", "cooldown_scope", "chance", "actions", "next_run"}
 
 _LOG_COLUMNS = {"crew_id", "ship_id", "confirmed_at", "status", "source", "gold", "doubloons", "emissary",
                 "reputation", "stats", "channel_id", "message_id"}
@@ -1417,4 +1462,92 @@ class Database:
             "INSERT INTO pirate_profiles (guild_id, user_id, gamertag, motto) VALUES (?, ?, ?, ?) "
             "ON CONFLICT (guild_id, user_id) DO UPDATE SET gamertag = excluded.gamertag, motto = excluded.motto",
             (guild_id, user_id, gamertag, motto))
+        await self.conn.commit()
+
+    # ------------------------------------------------------------ Articles
+    async def create_article(self, *, guild_id: int, name: str, trigger: str, value: str | None, match: str,
+                             threshold: int, created_by: int, created_at: str, next_run: str | None = None) -> "Article":
+        cur = await self.conn.execute(
+            "INSERT INTO articles (guild_id, name, trigger, value, match, threshold, created_by, created_at, next_run) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (guild_id, name, trigger, value, match, threshold, created_by, created_at, next_run))
+        await self.conn.commit()
+        return await self.get_article(cur.lastrowid)
+
+    async def get_article(self, article_id: int) -> "Article | None":
+        from .articles_logic import Article
+        row = await (await self.conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,))).fetchone()
+        return Article(**{k: row[k] for k in row.keys()}) if row else None
+
+    async def article_named(self, guild_id: int, name: str) -> "Article | None":
+        row = await (await self.conn.execute(
+            "SELECT id FROM articles WHERE guild_id = ? AND name = ? COLLATE NOCASE", (guild_id, name.strip()))).fetchone()
+        return await self.get_article(row["id"]) if row else None
+
+    async def articles(self, guild_id: int | None = None, trigger: str | None = None,
+                       enabled_only: bool = False) -> list["Article"]:
+        from .articles_logic import Article
+        sql, args = "SELECT * FROM articles WHERE 1 = 1", []
+        if guild_id is not None:
+            sql += " AND guild_id = ?"
+            args.append(guild_id)
+        if trigger is not None:
+            sql += " AND trigger = ?"
+            args.append(trigger)
+        if enabled_only:
+            sql += " AND enabled = 1"
+        rows = await (await self.conn.execute(sql + " ORDER BY name COLLATE NOCASE", args)).fetchall()
+        return [Article(**{k: r[k] for k in r.keys()}) for r in rows]
+
+    async def update_article(self, article_id: int, **values) -> "Article | None":
+        bad = set(values) - _ARTICLE_COLUMNS
+        if bad:
+            raise ValueError(f"Unknown article fields: {', '.join(sorted(bad))}")
+        if values:
+            cols = ", ".join(f"{k} = ?" for k in values)
+            await self.conn.execute(f"UPDATE articles SET {cols} WHERE id = ?", (*values.values(), article_id))
+            await self.conn.commit()
+        return await self.get_article(article_id)
+
+    async def delete_article(self, article_id: int) -> None:
+        await self.conn.execute("DELETE FROM articles WHERE id = ?", (article_id,))
+        await self.conn.commit()
+
+    async def bump_article_count(self, article_id: int, user_id: int) -> int:
+        await self.conn.execute(
+            "INSERT INTO article_counts (article_id, user_id, count) VALUES (?, ?, 1) "
+            "ON CONFLICT (article_id, user_id) DO UPDATE SET count = count + 1", (article_id, user_id))
+        await self.conn.commit()
+        row = await (await self.conn.execute(
+            "SELECT count FROM article_counts WHERE article_id = ? AND user_id = ?", (article_id, user_id))).fetchone()
+        return row["count"]
+
+    async def article_counts(self, article_id: int, limit: int = 10) -> list[tuple[int, int]]:
+        rows = await (await self.conn.execute(
+            "SELECT user_id, count FROM article_counts WHERE article_id = ? ORDER BY count DESC LIMIT ?",
+            (article_id, limit))).fetchall()
+        return [(r["user_id"], r["count"]) for r in rows]
+
+    async def mark_article_fired(self, article_id: int, message_id: int) -> bool:
+        """Remember an article fired on a message. False if it already had."""
+        cur = await self.conn.execute(
+            "INSERT OR IGNORE INTO article_fired (article_id, message_id) VALUES (?, ?)", (article_id, message_id))
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    async def set_role_timer(self, guild_id: int, user_id: int, role_id: int, until: str, mode: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO article_role_timers (guild_id, user_id, role_id, until, mode) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (guild_id, user_id, role_id) DO UPDATE SET until = excluded.until, mode = excluded.mode",
+            (guild_id, user_id, role_id, until, mode))
+        await self.conn.commit()
+
+    async def due_role_timers(self, now: str) -> list[tuple[int, int, int, str]]:
+        rows = await (await self.conn.execute(
+            "SELECT guild_id, user_id, role_id, mode FROM article_role_timers WHERE until <= ?", (now,))).fetchall()
+        return [(r["guild_id"], r["user_id"], r["role_id"], r["mode"]) for r in rows]
+
+    async def clear_role_timer(self, guild_id: int, user_id: int, role_id: int) -> None:
+        await self.conn.execute("DELETE FROM article_role_timers WHERE guild_id = ? AND user_id = ? AND role_id = ?",
+                                (guild_id, user_id, role_id))
         await self.conn.commit()

@@ -162,7 +162,7 @@ async def env(tmp_path):
     for cog in COGS:
         await bot.load_extension(cog)
     for name, loop in (("Birthdays", "announcer"), ("CrewCall", "upkeep"), ("Voyages", "clock"),
-                       ("Gangplank", "upkeep"), ("ShipsLog", "clock"), ("CrowsNest", "watch")):
+                       ("Gangplank", "upkeep"), ("ShipsLog", "clock"), ("CrowsNest", "watch"), ("Articles", "clock")):
         getattr(bot.get_cog(name), loop).cancel()
     text = FakeTextChannel(20)
     guild = FakeGuild(10, text)

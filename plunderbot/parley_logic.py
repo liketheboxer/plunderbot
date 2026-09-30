@@ -87,7 +87,7 @@ Ships (Sea of Thieves): /ship register, /ship edit, /ship retire, /ship show (a 
 Logging a voyage's plunder: /ship log with a screenshot of the Captain's Log two-page spread, or just @mention PlunderBot (or reply to it) with the screenshot. PlunderBot reads it; the member presses Confirm or Edit before it's saved.
 Pirate profiles: /pirate profile, /pirate set (gamertag and motto).
 About PlunderBot: /plunderbot.
-Quartermasters manage settings with /admin, /colours (role menus) and /noticeboard (pages)."""
+Quartermasters manage settings with /admin, /colours (role menus), /noticeboard (pages) and /articles (the server's automatic replies and rules: when someone says a word, joins, gets a role, reacts, or on a schedule)."""
 
 
 def system_prompt(*, server: str, now_local: datetime, zone_label: str, asker: str, asker_zone: str,
