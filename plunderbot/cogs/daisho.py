@@ -31,6 +31,7 @@ from ..birthday_logic import valid_timezone, zone
 from ..crew_logic import clean_title, iso, now_utc, voice_channel_name
 from ..discord_util import self_serve_problem
 from ..ledger_logic import KINDS
+from ..menu_logic import MAX_OPTIONS, button_text, is_emoji, slug
 from ..voyage_logic import ParseError, format_reminders, parse_reminders
 
 log = logging.getLogger("plunderbot.daisho")
@@ -38,7 +39,7 @@ log = logging.getLogger("plunderbot.daisho")
 POLL_SECONDS = 15
 PUSH_EVERY = 300        # send what changed
 FORCE_EVERY = 1800      # send everything anyway, so Daisho knows we're alive
-SECTIONS = ("guild", "settings", "articles", "pages", "voyages", "crews", "ledger")
+SECTIONS = ("guild", "settings", "articles", "pages", "voyages", "crews", "ledger", "menus")
 
 
 class ApplyError(Exception):
@@ -262,13 +263,30 @@ class Daisho(commands.Cog):
                 cat = getattr(c, "category", None)
                 chans.append({"id": c.id, "name": c.name, "type": kind, "category": cat.name if cat else None})
         me = guild.me
-        roles = [{"id": r.id, "name": r.name, "assignable": me is not None and self_serve_problem(r, me) is None}
+        roles = [{"id": r.id, "name": r.name, "assignable": me is not None and self_serve_problem(r, me) is None,
+                  "members": len(getattr(r, "members", None) or [])}
                  for r in sorted(guild.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed]
         emojis = [{"id": e.id, "name": e.name, "animated": e.animated} for e in guild.emojis]
         return {"id": str(guild.id), "name": guild.name, "timezone": s.timezone or self.bot.config.default_timezone,
                 "channels": chans, "roles": roles, "emojis": emojis,
                 "games": [{"key": g.key, "name": g.name} for g in games.GAMES],
                 "version": self.bot.version}
+
+    async def snap_menus(self, guild):
+        """Role menus (1.1.0), with how many members wear each role on them."""
+        out = []
+        for m in await self.bot.db.menus(guild.id):
+            opts = []
+            for o in m.options:
+                role = guild.get_role(o.role_id)
+                opts.append({"role_id": o.role_id, "role": role.name if role else None,
+                             "members": len(getattr(role, "members", None) or []) if role else 0, "emoji": o.emoji, "label": o.label,
+                             "description": o.description})
+            out.append({"id": m.id, "key": m.key, "title": m.title, "description": m.description, "mode": m.mode,
+                        "channel_id": m.channel_id, "message_id": m.message_id, "onboarding": bool(m.onboarding),
+                        "colour": m.colour, "button_label": m.button_label, "button_emoji": m.button_emoji,
+                        "button_text": button_text(m), "options": opts})
+        return out
 
     async def snap_settings(self, guild):
         s = asdict(await self.bot.db.get_settings(guild.id))
@@ -655,6 +673,101 @@ class Daisho(commands.Cog):
             raise ApplyError(note or "The page has nothing to post.")
         return f"Posted in #{channel.name} ({count} message{'s' if count != 1 else ''}). {note}".strip()
 
+    # ------------------------------------------------------------ applying: role menus (1.1.0)
+    def _menu_emoji(self, guild, text, what: str) -> str | None:
+        t = server_emoji(str(text or "").strip(), guild.emojis)
+        if not t:
+            return None
+        if not is_emoji(t):
+            raise ApplyError(f"{what}: \"{text}\" isn't an emoji. Paste one, or type a server emoji's name like :Bruh:.")
+        return t
+
+    async def apply_menu_save(self, guild, p: dict) -> str:
+        db = self.bot.db
+        menu = await db.get_menu(int(p["id"])) if p.get("id") else None
+        if p.get("id") and (menu is None or menu.guild_id != guild.id):
+            raise ApplyError("That menu no longer exists.")
+        title = " ".join(str(p.get("title") or "").split())[:100]
+        if not title:
+            raise ApplyError("A menu needs a title.")
+        description = str(p.get("description") or "").strip()[:2000] or None
+        mode = "single" if p.get("mode") == "single" else "multi"
+        colour = self._colour(p.get("colour"))
+        label = " ".join(str(p.get("button_label") or "").split())[:80] or None
+        button_emoji = self._menu_emoji(guild, p.get("button_emoji"), "The button's emoji")
+        opts = p.get("options") or []
+        if not isinstance(opts, list) or len(opts) > MAX_OPTIONS:
+            raise ApplyError(f"A menu holds {MAX_OPTIONS} roles at most.")
+        rows, seen = [], set()
+        for i, o in enumerate(opts, start=1):
+            if not isinstance(o, dict):
+                raise ApplyError("That change arrived garbled; make it again.")
+            role = guild.get_role(int(o.get("role_id") or 0))
+            if role is None:
+                raise ApplyError(f"Role {i} no longer exists.")
+            if role.id in seen:
+                raise ApplyError(f"{role.name} is on the menu twice.")
+            seen.add(role.id)
+            problem = self_serve_problem(role, guild.me)
+            if problem:
+                raise ApplyError(problem)
+            emoji = self._menu_emoji(guild, o.get("emoji"), role.name)
+            rlabel = " ".join(str(o.get("label") or "").split())[:100] or None
+            rdesc = " ".join(str(o.get("description") or "").split())[:100] or None
+            rows.append((role.id, emoji, rlabel, rdesc))
+        if menu is None:
+            key, n = slug(title), 2
+            while await db.menu_by_key(guild.id, key):
+                key, n = f"{slug(title)[:36]}-{n}", n + 1
+            menu = await db.create_menu(guild.id, key, title, description, mode)
+            verb = "created"
+        else:
+            verb = "saved"
+        menu = await db.update_menu(menu.id, title=title, description=description, mode=mode, colour=colour,
+                                    button_label=label, button_emoji=button_emoji,
+                                    onboarding=1 if p.get("onboarding") else 0)
+        await db.replace_menu_options(menu.id, rows)
+        menu = await db.get_menu(menu.id)
+        note = ""
+        cog = self.bot.get_cog("Colours")
+        if cog is not None and menu.channel_id and menu.message_id:
+            note = " " + await cog.refresh(guild, menu)
+        return f"Menu {title} {verb}.{note}"
+
+    async def apply_menu_post(self, guild, p: dict) -> str:
+        cog = self.bot.get_cog("Colours")
+        menu = await self.bot.db.get_menu(int(p.get("id") or 0))
+        if menu is None or menu.guild_id != guild.id or cog is None:
+            raise ApplyError("That menu no longer exists.")
+        if not menu.options:
+            raise ApplyError("Add some roles before posting it.")
+        channel = guild.get_channel(int(p.get("channel_id") or menu.channel_id or 0))
+        if not isinstance(channel, discord.TextChannel):
+            raise ApplyError("Pick a channel to post it in.")
+        perms = channel.permissions_for(guild.me)
+        if not (perms.view_channel and perms.send_messages and perms.embed_links):
+            raise ApplyError(f"PlunderBot needs Send Messages and Embed Links in #{channel.name}.")
+        if menu.channel_id == channel.id and menu.message_id:
+            note = await cog.refresh(guild, menu)
+            if note.startswith("The posted card"):
+                return f"Updated the card in #{channel.name}."
+        await cog.post_to(guild, menu, channel)
+        return f"Posted in #{channel.name}."
+
+    async def apply_menu_delete(self, guild, p: dict) -> str:
+        menu = await self.bot.db.get_menu(int(p.get("id") or 0))
+        if menu is None or menu.guild_id != guild.id:
+            raise ApplyError("That menu no longer exists.")
+        if menu.channel_id and menu.message_id:
+            channel = guild.get_channel(menu.channel_id)
+            if channel is not None:
+                try:
+                    await channel.get_partial_message(menu.message_id).delete()
+                except discord.HTTPException:
+                    pass
+        await self.bot.db.delete_menu(menu.id)
+        return f"Deleted {menu.title}. Nobody's roles were changed."
+
     # ------------------------------------------------------------ applying: voyages and crews
     async def apply_voyage_update(self, guild, p: dict) -> str:
         cog = self.bot.get_cog("Voyages")
@@ -798,6 +911,9 @@ HANDLERS = {
     "crew.rename": Daisho.apply_crew_rename,
     "ship.update": Daisho.apply_ship_update,
     "log.remove": Daisho.apply_log_remove,
+    "menu.save": Daisho.apply_menu_save,
+    "menu.post": Daisho.apply_menu_post,
+    "menu.delete": Daisho.apply_menu_delete,
 }
 
 

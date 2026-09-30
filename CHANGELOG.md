@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 (2026-09-30): Role menus on Daisho
+
+Pairs with The Magical Samurai 1.14.0.
+
+- Role menus (Colours) can be built and edited on Daisho's new **Role menus** screen, with a live preview of the card: title, text, pick-one or pick-any, and each role's emoji, name in the list and the line under it, in any order; then posted, moved or deleted. The same checks as `/colours add` apply (no moderator roles, nothing above PlunderBot's role, real emoji only).
+- A menu's card can have its own **colour**, and its button its own **words and emoji**, instead of the fixed "Choose <title>". The welcome-aboard buttons use them too.
+- An option's emoji must now be a real emoji (or a server emoji): a word like "joystick" left over from an import is refused on Daisho, so it can be fixed there.
+- Daisho is sent the menus, and how many members wear each role, with the rest of PlunderBot's data.
+
 ## 1.0.1 (2026-09-30): Daisho hardening
 
 Fixes from a security check of PlunderBot and its Daisho screens. Pairs with The Magical Samurai 1.12.1.

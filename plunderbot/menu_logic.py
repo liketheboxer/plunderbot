@@ -47,6 +47,17 @@ def first_emoji(text: str) -> str | None:
     return None
 
 
+def is_emoji(text: str | None) -> bool:
+    """Whether this is exactly one emoji: a standard one, or a server emoji (<:name:id>). Words like
+    "joystick" (what an emoji's name looks like when it didn't come across) aren't."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _CUSTOM.fullmatch(t):
+        return True
+    return first_emoji(t) == t
+
+
 def parse_import(text: str) -> list[tuple[str | None, int]]:
     """Pull (emoji, role id) pairs out of a reaction-role message, one per line that mentions a role:
     "🇼 : @North America - West" becomes ("🇼", <that role's id>)."""
@@ -89,10 +100,20 @@ def option_line(emoji: str | None, role_id: int, description: str | None) -> str
     return f"{line} · {description}" if description else line
 
 
+def button_text(menu) -> str:
+    """The words on a menu's button: its own, or "Choose <title>"."""
+    label = (getattr(menu, "button_label", None) or "").strip()
+    if label:
+        return label[:80]
+    return f"Choose {menu.title}" if len(menu.title) < 60 else "Choose roles"
+
+
 def render_menu(menu, colour: discord.Colour | None = None) -> discord.Embed:
     """The menu's card: title, description and the roles on offer. Role mentions in an embed
     don't ping anyone."""
-    embed = discord.Embed(title=menu.title, colour=colour or discord.Colour.teal())
+    own = getattr(menu, "colour", None)
+    embed = discord.Embed(title=menu.title, colour=colour or (discord.Colour(own) if own is not None
+                                                                else discord.Colour.teal()))
     lines = [option_line(o.emoji, o.role_id, o.description) for o in menu.options]
     body = (menu.description or "").strip()
     listing = "\n".join(lines) if lines else "*No roles on this menu yet.*"

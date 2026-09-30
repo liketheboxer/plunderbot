@@ -405,6 +405,12 @@ MIGRATIONS: list[str] = [
         at        TEXT NOT NULL
     );
     """,
+    # 1.1.0: a role menu's card colour, and its button's words and emoji (set on Daisho's editor)
+    """
+    ALTER TABLE role_menus ADD COLUMN colour INTEGER;
+    ALTER TABLE role_menus ADD COLUMN button_label TEXT;
+    ALTER TABLE role_menus ADD COLUMN button_emoji TEXT;
+    """,
 ]
 
 
@@ -466,6 +472,9 @@ class RoleMenu:
     message_id: int | None = None
     onboarding: int = 0  # offered to newcomers when they're let aboard
     position: int = 0
+    colour: int | None = None        # the card's colour (None: teal)
+    button_label: str | None = None  # None: "Choose <title>"
+    button_emoji: str | None = None
     options: list[MenuOption] = field(default_factory=list)
 
 
@@ -1066,13 +1075,22 @@ class Database:
 
     async def update_menu(self, menu_id: int, **values) -> RoleMenu | None:
         bad = set(values) - {"key", "title", "description", "mode", "channel_id", "message_id", "onboarding",
-                             "position"}
+                             "position", "colour", "button_label", "button_emoji"}
         if bad:
             raise ValueError(f"Unknown menu fields: {', '.join(sorted(bad))}")
         cols = ", ".join(f"{k} = ?" for k in values)
         await self.conn.execute(f"UPDATE role_menus SET {cols} WHERE id = ?", (*values.values(), menu_id))
         await self.conn.commit()
         return await self.get_menu(menu_id)
+
+    async def replace_menu_options(self, menu_id: int, options: list[tuple]) -> None:
+        """Set a menu's roles to exactly these, in this order: (role_id, emoji, label, description)."""
+        await self.conn.execute("DELETE FROM role_menu_options WHERE menu_id = ?", (menu_id,))
+        for pos, (role_id, emoji, label, description) in enumerate(options, start=1):
+            await self.conn.execute(
+                "INSERT INTO role_menu_options (menu_id, role_id, emoji, label, description, position) "
+                "VALUES (?, ?, ?, ?, ?, ?)", (menu_id, role_id, emoji, label, description, pos))
+        await self.conn.commit()
 
     async def delete_menu(self, menu_id: int) -> None:
         await self.conn.execute("DELETE FROM role_menu_options WHERE menu_id = ?", (menu_id,))

@@ -17,7 +17,7 @@ from discord.ext import commands
 from .. import voice
 from ..db import RoleMenu
 from ..discord_util import fetch_linked, finish, self_serve_problem
-from ..menu_logic import (MAX_OPTIONS, first_emoji, infer_role, match_role_by_name, parse_lines,
+from ..menu_logic import (MAX_OPTIONS, button_text, first_emoji, infer_role, match_role_by_name, parse_lines,
                           partial_emoji, plan, render_menu, slug)
 from ..region_logic import broad_zones_for
 
@@ -46,7 +46,7 @@ class MenuButton(discord.ui.DynamicItem[discord.ui.Button], template=r"colours:o
 
 def menu_view(menu: RoleMenu) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
-    view.add_item(MenuButton(menu.id, f"Choose {menu.title}" if len(menu.title) < 60 else "Choose roles"))
+    view.add_item(MenuButton(menu.id, button_text(menu), menu.button_emoji))
     return view
 
 
@@ -197,7 +197,7 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
 
     async def onboarding_items(self, guild: discord.Guild) -> list[discord.ui.Item]:
         """Buttons for the menus newcomers are offered when they're let aboard."""
-        return [MenuButton(m.id, f"Choose {m.title}" if len(m.title) < 60 else m.title[:80])
+        return [MenuButton(m.id, button_text(m), m.button_emoji)
                 for m in await self.bot.db.menus(guild.id) if m.onboarding and m.options][:10]
 
     # ------------------------------------------------------------ Quartermasters: building menus
@@ -345,17 +345,23 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
             if note.startswith("The posted card"):
                 await interaction.response.send_message(f"Already posted there. {note}", ephemeral=True)
                 return
+        message = await self.post_to(interaction.guild, m, channel)
+        await interaction.response.send_message(f"Posted **{m.title}**: {message.jump_url}", ephemeral=True)
+
+    async def post_to(self, guild: discord.Guild, m: RoleMenu, channel) -> discord.Message:
+        """Post a fresh card in `channel`, and take down the old one if it was elsewhere. Used by
+        /colours post and by Daisho's role-menu editor."""
         old = (m.channel_id, m.message_id)
         message = await channel.send(embed=render_menu(m), view=menu_view(m))
         await self.bot.db.update_menu(m.id, channel_id=channel.id, message_id=message.id)
         if old[1] and old != (channel.id, message.id):
-            old_channel = interaction.guild.get_channel(old[0])
+            old_channel = guild.get_channel(old[0])
             if old_channel is not None:
                 try:
                     await old_channel.get_partial_message(old[1]).delete()
                 except discord.HTTPException:
                     pass
-        await interaction.response.send_message(f"Posted **{m.title}**: {message.jump_url}", ephemeral=True)
+        return message
 
     @app_commands.command(name="import", description="Copy a reaction-role message (e.g. MEE6's) into a new menu")
     @app_commands.describe(message="Link to the message (right-click it › Copy Message Link)",

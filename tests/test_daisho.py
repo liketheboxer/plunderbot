@@ -143,7 +143,7 @@ async def test_snapshots_go_out_once_then_only_when_changed(env):
     await bot.db.update_settings(10, crew_channel_id=20, timezone="America/Los_Angeles")
     await cog.run_once(guild, now=0)
     sent = cog.client.snapshots[-1]
-    assert set(sent) == {"guild", "settings", "articles", "pages", "voyages", "crews", "ledger"}
+    assert set(sent) == {"guild", "settings", "articles", "pages", "voyages", "crews", "ledger", "menus"}
     g = sent["guild"]
     assert {"id": 20, "name": "looking-for-group", "type": "text", "category": None} in g["channels"]
     assert {"id": 7, "name": "◑~ Voice Channels", "type": "category", "category": None} in g["channels"]
@@ -159,7 +159,7 @@ async def test_snapshots_go_out_once_then_only_when_changed(env):
     assert set(cog.client.snapshots[-1]) == {"ledger"}
     assert cog.client.snapshots[-1]["ledger"]["ships"][0]["name"] == "Depth Charge"
     await cog.run_once(guild, now=2000)        # the half-hour pass sends everything
-    assert len(cog.client.snapshots[-1]) == 7
+    assert len(cog.client.snapshots[-1]) == 8
 
 
 async def test_daisho_down_never_stops_the_bot(env):
@@ -406,3 +406,42 @@ async def test_roles_from_daisho_get_the_slash_command_checks(env):
     res = await run(cog, guild, ("settings", "settings.update", {"fields": {"pending_role_id": 60}}),
                     ("settings", "settings.update", {"fields": {"pending_role_id": 31}}))
     assert [s for _, s, _ in res] == ["failed", "applied"]
+
+
+
+async def test_role_menus_from_daisho(env):
+    """1.1.0: the role-menu editor: save (with the card's colour and button), post, delete."""
+    bot, cog, guild = env
+    res = await run(cog, guild, ("menus", "menu.save", {
+        "title": "Pick your platforms", "description": "What do you play on?", "mode": "multi", "colour": "#1ABC9C",
+        "button_label": "Pick platforms", "button_emoji": "🎮", "onboarding": True,
+        "options": [{"role_id": 31, "emoji": "🖥️", "label": "PC", "description": "Keyboard and mouse"},
+                    {"role_id": 30, "emoji": None}]}))
+    assert res[0][1] == "applied", res
+    m = (await bot.db.menus(10))[0]
+    assert (m.title, m.colour, m.button_label, m.button_emoji, m.onboarding) == \
+        ("Pick your platforms", 0x1ABC9C, "Pick platforms", "🎮", 1)
+    assert [o.role_id for o in m.options] == [31, 30] and m.options[0].label == "PC"
+    snap = (await cog.snap_menus(guild))[0]
+    assert snap["button_text"] == "Pick platforms" and snap["options"][0]["role"] == "Bruh Lord"
+    # the checks the slash commands make
+    bad = await run(cog, guild,
+                    ("menus", "menu.save", {"id": m.id, "title": "X", "options": [{"role_id": 1}]}),    # @everyone
+                    ("menus", "menu.save", {"id": m.id, "title": "X", "options": [{"role_id": 31, "emoji": "joystick"}]}),
+                    ("menus", "menu.save", {"id": m.id, "title": "X", "options": [{"role_id": 31}, {"role_id": 31}]}),
+                    ("menus", "menu.save", {"id": m.id, "title": "", "options": []}))
+    assert [s for _, s, _ in bad] == ["failed"] * 4
+    assert "isn't an emoji" in bad[1][2]
+    # post it, then post again in the same place: the card is updated in place
+    res = await run(cog, guild, ("menus", "menu.post", {"id": m.id, "channel_id": 20}))
+    assert res[0][1] == "applied" and guild.chans[20].sent
+    m = await bot.db.get_menu(m.id)
+    assert m.channel_id == 20 and m.message_id
+    res = await run(cog, guild, ("menus", "menu.delete", {"id": m.id}))
+    assert res[0][1] == "applied" and await bot.db.menus(10) == []
+
+
+def test_is_emoji():
+    from plunderbot.menu_logic import is_emoji
+    assert is_emoji("🎮") and is_emoji("🇺🇸") and is_emoji("<:Bruh:123456789012345678>") and is_emoji("👍🏽")
+    assert not is_emoji("joystick") and not is_emoji("🎮 PC") and not is_emoji("")
