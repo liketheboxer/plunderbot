@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 (2026-09-29): Fortnite news
+
+- Fortnite's news now comes built in: Epic's in-game news (the lobby news screen), via fortnite-api.com. No key needed.
+
 ## 0.6.1 (2026-09-29): Sturdier news feeds
 
 - The Crow's Nest reads feeds with the usual mistakes in them (HTML entities like `&nbsp;`, stray `&` and control characters), and says plainly when an address sends a web page instead of a feed.

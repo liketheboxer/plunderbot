@@ -62,7 +62,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 ### How the Ship's Log and Crow's Nest work
 
 - Every week (Sunday 6 PM server time by default) the Ship's Log posts a roundup: crews that sailed, voyages sailed and coming up, birthdays this week, new pirates, the liveliest game threads, and game news.
-- The Crow's Nest checks each game's official news every 30 minutes and posts anything new in its thread in the game forum. Steam games are built in; games not on Steam need an RSS or Atom feed. When it's turned on (or a game is first seen) it only notes what's already out, so old posts don't flood in. At most three new posts per game per check.
+- The Crow's Nest checks each game's official news every 30 minutes and posts anything new in its thread in the game forum. Steam games and Fortnite (Epic's in-game news) are built in; other games need an RSS or Atom feed. When it's turned on (or a game is first seen) it only notes what's already out, so old posts don't flood in. At most three new posts per game per check.
 
 ### How Gangplank works
 

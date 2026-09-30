@@ -17,7 +17,8 @@ from discord.ext import commands, tasks
 
 from .. import games, voice
 from ..crew_logic import iso
-from ..news_logic import NewsItem, new_items, parse_feed, parse_steam, source_for, steam_url
+from ..news_logic import (FORTNITE_NEWS_URL, NewsItem, new_items, parse_feed, parse_fortnite, parse_steam,
+                          source_for, steam_url)
 
 log = logging.getLogger("plunderbot.crowsnest")
 USER_AGENT = "PlunderBot (Discord bot for Brimstone Hill Fortress)"
@@ -46,12 +47,19 @@ class CrowsNest(commands.Cog):
     async def fetch(self, source: tuple[str, str]) -> list[NewsItem]:
         kind, value = source
         session = await self.http()
-        url = steam_url(value) if kind == "steam" else value
+        if kind == "steam":
+            url = steam_url(value)
+        elif kind == "fortnite":
+            url = FORTNITE_NEWS_URL.format(mode=value or "br")
+        else:
+            url = value
         async with session.get(url) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"{url.split('?')[0]} answered {resp.status}")
             if kind == "steam":
                 return parse_steam(await resp.json(content_type=None))
+            if kind == "fortnite":
+                return parse_fortnite(await resp.json(content_type=None))
             return parse_feed(await resp.text())
 
     # ------------------------------------------------------------ the watch

@@ -107,7 +107,8 @@ def test_clean_and_images():
 
 def test_sources_and_new_items():
     assert source_for("sot", {}) == ("steam", "1172620")
-    assert source_for("fortnite", {}) is None
+    assert source_for("fortnite", {}) == ("fortnite", "br")
+    assert source_for("lol", {}) is None
     assert source_for("fortnite", {"fortnite": ("feed", "https://f.example/rss")}) == ("feed", "https://f.example/rss")
     assert source_for("sot", {"sot": ("none", None)}) is None
     assert all(isinstance(v, int) for v in STEAM_APPS.values())
@@ -199,7 +200,7 @@ async def test_crowsnest_first_look_then_new_posts(bot, monkeypatch):
     cog = bot.get_cog("CrowsNest")
     thread = Channel(61)
     entries = [{"key": "sot", "name": "Sea of Thieves", "thread": thread},
-               {"key": "fortnite", "name": "Fortnite", "thread": Channel(62)},
+               {"key": "lol", "name": "League of Legends", "thread": Channel(62)},
                {"key": "drg", "name": "Deep Rock Galactic", "thread": None}]
 
     async def fake_entries(guild):
@@ -216,7 +217,7 @@ async def test_crowsnest_first_look_then_new_posts(bot, monkeypatch):
     guild = SimpleNamespace(id=5)
     notes = await cog.check(guild)
     assert notes["sot"].startswith("watching") and not thread.sent
-    assert notes["fortnite"] == "no news source" and notes["drg"] == "no forum thread"
+    assert notes["lol"] == "no news source" and notes["drg"] == "no forum thread"
     feed.append(NewsItem("2", "Season 18", "https://x/2", datetime(2026, 10, 1, tzinfo=timezone.utc), "Ahoy",
                          "https://x/2.png"))
     notes = await cog.check(guild)
@@ -243,3 +244,15 @@ def test_web_pages_and_broken_feeds_explain_themselves():
         parse_feed("<!DOCTYPE html><html><head><title>Just a moment...</title></head></html>")
     with pytest.raises(ValueError, match="too broken"):
         parse_feed("<rss><channel><item><title>oops</item></rss>")
+
+
+def test_parse_fortnite_in_game_news():
+    from plunderbot.news_logic import parse_fortnite
+    data = {"status": 200, "data": {"date": "2026-09-29T14:00:00Z", "motds": [
+        {"id": "override", "title": "Fortnite: Override Is Here!", "body": "Break the rules. Change the game!",
+         "image": "https://fortnite-api.com/images/1.jpg", "hidden": False},
+        {"id": "secret", "title": "Hidden tile", "body": "x", "hidden": True}]}}
+    (item,) = parse_fortnite(data)
+    assert (item.id, item.title, item.summary) == ("override", "Fortnite: Override Is Here!",
+                                                   "Break the rules. Change the game!")
+    assert item.image.endswith("1.jpg") and item.published.year == 2026

@@ -45,9 +45,38 @@ class NewsItem:
     image: str | None = None
 
 
+# Games with their own official news source rather than Steam.
+OTHER_SOURCES: dict[str, tuple[str, str]] = {
+    "fortnite": ("fortnite", "br"),  # Epic's in-game news (the lobby's news screen), via fortnite-api.com
+}
+FORTNITE_NEWS_URL = "https://fortnite-api.com/v2/news/{mode}"
+
+
 def default_source(game_key: str) -> tuple[str, str] | None:
     appid = STEAM_APPS.get(game_key)
-    return ("steam", str(appid)) if appid else None
+    if appid:
+        return ("steam", str(appid))
+    return OTHER_SOURCES.get(game_key)
+
+
+def parse_fortnite(data: dict) -> list[NewsItem]:
+    """fortnite-api.com's copy of Epic's in-game news: one item per news tile."""
+    body = data.get("data") or {}
+    when = None
+    if body.get("date"):
+        try:
+            when = datetime.fromisoformat(body["date"].replace("Z", "+00:00"))
+        except ValueError:
+            when = None
+    items = []
+    for m in body.get("motds") or []:
+        if m.get("hidden"):
+            continue
+        title = (m.get("title") or m.get("tabTitle") or "Fortnite news").strip()
+        items.append(NewsItem(id=str(m.get("id") or title), title=title, url="https://www.fortnite.com/news",
+                              published=when, summary=clean(m.get("body") or ""),
+                              image=m.get("image") or m.get("tileImage")))
+    return items
 
 
 def source_for(game_key: str, overrides: dict[str, tuple[str, str | None]]) -> tuple[str, str] | None:
