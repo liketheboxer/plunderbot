@@ -704,6 +704,12 @@ class Database:
         await self.conn.commit()
 
     # ------------------------------------------------------------ settings
+    async def gated_roles(self, guild_id: int) -> dict[int, str]:
+        """The Gangplank's roles, which no menu, game list or article may hand out or take away (1.1.2)."""
+        s = await self.get_settings(guild_id)
+        return {rid: what for rid, what in ((s.pending_role_id, "Pending"), (s.harbormaster_role_id, "Harbormaster"))
+                if rid}
+
     async def get_settings(self, guild_id: int) -> GuildSettings:
         row = await (await self.conn.execute(
             "SELECT * FROM guild_settings WHERE guild_id = ?", (guild_id,))).fetchone()

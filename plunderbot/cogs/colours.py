@@ -143,8 +143,8 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
             return
         add_roles = [guild.get_role(r) for r in add]
         remove_roles = [guild.get_role(r) for r in remove]
-        me = guild.me
-        if any(self_serve_problem(r, me) for r in add_roles + remove_roles):
+        me, gated = guild.me, await self.bot.db.gated_roles(guild.id)
+        if any(self_serve_problem(r, me, gated) for r in add_roles + remove_roles):
             await finish(interaction, content=voice.say("colours_cant"), view=None)
             return
         try:
@@ -250,7 +250,7 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
         m = await self._get(interaction, menu)
         if m is None:
             return
-        problem = self_serve_problem(role, interaction.guild.me)
+        problem = self_serve_problem(role, interaction.guild.me, await self.bot.db.gated_roles(interaction.guild_id))
         if problem:
             await interaction.response.send_message(problem, ephemeral=True)
             return
@@ -399,12 +399,13 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
         intro = "\n".join(kept).strip() or None
         m = await self.bot.db.create_menu(guild.id, key, title, intro[:2000] if intro else None, mode.value)
         added, skipped = [], []
+        gated = await self.bot.db.gated_roles(guild.id)
         for emoji, role_id, how, label in found[:MAX_OPTIONS]:
             if role_id is None:
                 skipped.append(f"{emoji or ''} {label} (no matching role found)".strip())
                 continue
             role = guild.get_role(role_id)
-            problem = "it no longer exists" if role is None else self_serve_problem(role, guild.me)
+            problem = "it no longer exists" if role is None else self_serve_problem(role, guild.me, gated)
             if problem:
                 skipped.append(f"<@&{role_id}> ({problem})")
                 continue
@@ -421,8 +422,8 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
     async def resolve_import(self, guild: discord.Guild, msg, text: str) -> list[tuple]:
         """(emoji, role id or None, how, label) for each option in a reaction-role message. Roles come
         from a mention, else a role with the same name, else whoever reacted with that emoji."""
-        me = guild.me
-        pickable = {r.id: r.name for r in guild.roles if self_serve_problem(r, me) is None}
+        me, gated = guild.me, await self.bot.db.gated_roles(guild.id)
+        pickable = {r.id: r.name for r in guild.roles if self_serve_problem(r, me, gated) is None}
         entries = parse_lines(text)
         reactions = {str(r.emoji): r for r in getattr(msg, "reactions", [])}
         if not entries:  # no list in the text: go by the reactions themselves

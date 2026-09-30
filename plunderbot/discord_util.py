@@ -16,8 +16,12 @@ def elevated(p: discord.Permissions) -> bool:
                 p.view_audit_log, p.move_members, p.mute_members, p.deafen_members))
 
 
-def self_serve_problem(role: discord.Role, me: discord.Member) -> str | None:
-    """Why members can't be allowed to give themselves this role, or None if they can."""
+def self_serve_problem(role: discord.Role, me: discord.Member, gated: dict[int, str] | None = None) -> str | None:
+    """Why members can't be allowed to give themselves this role, or None if they can.
+    `gated` is the Gangplank's roles (db.gated_roles): Pending and Harbormaster must never be self-serve,
+    or a newcomer could take Pending off themselves, or anyone could make themselves a Harbormaster."""
+    if gated and role.id in gated:
+        return f"{role.name} is the Gangplank's {gated[role.id]} role, so it can't be self-serve."
     if role.is_default() or role.managed:
         return f"{role.name} is managed by Discord or another app."
     if elevated(role.permissions):

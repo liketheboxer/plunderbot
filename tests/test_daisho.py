@@ -441,6 +441,21 @@ async def test_role_menus_from_daisho(env):
     assert res[0][1] == "applied" and await bot.db.menus(10) == []
 
 
+async def test_gangplank_roles_are_never_self_serve(env):
+    """1.1.2: the Pending and Harbormaster roles can't go on a menu, or a newcomer could untick Pending."""
+    bot, cog, guild = env
+    await bot.db.update_settings(guild.id, pending_role_id=31, harbormaster_role_id=30)
+    res = await run(cog, guild, ("menus", "menu.save", {"title": "Sneaky", "options": [{"role_id": 31}]}),
+                    ("menus", "menu.save", {"title": "Sneakier", "options": [{"role_id": 30}]}))
+    assert [s for _, s, _ in res] == ["failed", "failed"]
+    assert "Gangplank's Pending role" in res[0][2] and "Harbormaster" in res[1][2]
+    roles = {r["id"]: r["assignable"] for r in (await cog.snap_guild(guild))["roles"]}
+    assert roles[31] is False and roles[30] is False
+    await bot.db.update_settings(guild.id, pending_role_id=None, harbormaster_role_id=None)
+    roles = {r["id"]: r["assignable"] for r in (await cog.snap_guild(guild))["roles"]}
+    assert roles[31] is True
+
+
 def test_is_emoji():
     from plunderbot.menu_logic import is_emoji
     assert is_emoji("🎮") and is_emoji("🇺🇸") and is_emoji("<:Bruh:123456789012345678>") and is_emoji("👍🏽")

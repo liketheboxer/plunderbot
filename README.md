@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.1.1 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho). The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.1.2 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho). The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -58,7 +58,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - Menus marked with `/colours onboarding` appear as buttons on the welcome-aboard message, alongside **Follow games**. Other menus live wherever they're posted (for Brimstone, #new-pirate-orientation), and the welcome-aboard message points there.
 - A region role sets the time zone PlunderBot reads your typed times in (see [How Voyages work](#how-voyages-work)). Picking a region too broad for one zone (Asia, South America) asks which zone is closest.
 - `/colours import` copies a MEE6 reaction-role message (emoji and roles) into a new menu; the old message is left alone until you delete it.
-- PlunderBot won't hand out roles with moderator permissions, or roles above its own.
+- PlunderBot won't hand out roles with moderator permissions, roles above its own, or the Gangplank's Pending and Harbormaster roles (so nobody can let themselves aboard). The same goes for **Follow games** and article role actions.
 - Menus can also be built and edited on Daisho's **Role menus** screen (1.1.0), with a live preview of the card, how many members wear each role, a colour for the card and the button's own words and emoji. Only Daisho Commanders can edit them there.
 
 ### How the Notice Board works

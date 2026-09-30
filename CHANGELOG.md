@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 (2026-09-30): Gangplank roles stay off menus
+
+- The Gangplank's **Pending** and **Harbormaster** roles can no longer be self-serve: not on a role menu (from `/colours add`, `/colours import` or Daisho's editor), not in Follow games, and not in an article's role action. Before, a Pending role put on a menu would have let a newcomer untick it and skip the Gangplank. Daisho's editor stops offering them.
+
 ## 1.1.1 (2026-09-30): Onboarding wording
 
 - The welcome-aboard message and the "which zone is closest?" prompt no longer say a region role makes PlunderBot show times in your zone (Discord timestamps already do that for everyone). They now say what it does: sets the zone PlunderBot reads the times you type in.

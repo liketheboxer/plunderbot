@@ -254,7 +254,7 @@ class Articles(commands.GroupCog, group_name="articles", group_description="The 
         article = await self.find(interaction, name)
         if article is None:
             return
-        problem = self_serve_problem(role, interaction.guild.me)
+        problem = self_serve_problem(role, interaction.guild.me, await self.bot.db.gated_roles(interaction.guild_id))
         if problem:
             await self._say(interaction, problem)
             return
@@ -529,7 +529,7 @@ class Articles(commands.GroupCog, group_name="articles", group_description="The 
                 await target.send(embed=repost_embed(message), allowed_mentions=discord.AllowedMentions.none())
         elif kind == ROLE and member is not None and hasattr(member, "add_roles"):
             role = guild.get_role(action["role_id"])
-            if role is None or self_serve_problem(role, guild.me):
+            if role is None or self_serve_problem(role, guild.me, await self.bot.db.gated_roles(guild.id)):
                 log.warning("Article %s can't hand out role %s", article.name, action["role_id"])
                 return
             reason = f"Article: {article.name}"

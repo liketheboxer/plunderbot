@@ -669,7 +669,8 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
             return
         add_roles = [guild.get_role(r) for r in add]
         remove_roles = [guild.get_role(r) for r in remove]
-        if any(self_serve_problem(r, guild.me) for r in add_roles + remove_roles):
+        gated = await self.bot.db.gated_roles(guild.id)
+        if any(self_serve_problem(r, guild.me, gated) for r in add_roles + remove_roles):
             await finish(interaction, content=voice.say("colours_cant"), view=None)
             return
         try:

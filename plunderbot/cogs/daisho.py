@@ -262,8 +262,9 @@ class Daisho(commands.Cog):
             if kind:
                 cat = getattr(c, "category", None)
                 chans.append({"id": c.id, "name": c.name, "type": kind, "category": cat.name if cat else None})
-        me = guild.me
-        roles = [{"id": r.id, "name": r.name, "assignable": me is not None and self_serve_problem(r, me) is None,
+        me, gated = guild.me, await self.bot.db.gated_roles(guild.id)
+        roles = [{"id": r.id, "name": r.name,
+                  "assignable": me is not None and self_serve_problem(r, me, gated) is None,
                   "members": len(getattr(r, "members", None) or [])}
                  for r in sorted(guild.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed]
         emojis = [{"id": e.id, "name": e.name, "animated": e.animated} for e in guild.emojis]
@@ -489,7 +490,7 @@ class Daisho(commands.Cog):
             return " ".join(str(value).split())
         return None
 
-    def _article_action(self, guild, trigger: str, a, old_images: set[str]) -> dict:
+    def _article_action(self, guild, trigger: str, a, old_images: set[str], gated: dict[int, str] | None = None) -> dict:
         if not isinstance(a, dict) or a.get("type") not in ACTIONS:
             raise ApplyError("An action has an unknown type.")
         kind = a["type"]
@@ -518,7 +519,7 @@ class Daisho(commands.Cog):
             role = guild.get_role(int(a.get("role_id") or 0))
             if role is None:
                 raise ApplyError("A role action's role no longer exists.")
-            problem = self_serve_problem(role, guild.me)
+            problem = self_serve_problem(role, guild.me, gated)
             if problem:
                 raise ApplyError(problem)
             mins = a.get("minutes")
@@ -575,7 +576,8 @@ class Daisho(commands.Cog):
         if not isinstance(acts, list) or len(acts) > MAX_ACTIONS:
             raise ApplyError(f"An article can do at most {MAX_ACTIONS} things.")
         old_images = {a.get("image") for a in (existing.action_list if existing else []) if a.get("image")}
-        actions = [self._article_action(guild, trigger, a, old_images) for a in acts]
+        gated = await self.bot.db.gated_roles(guild.id)
+        actions = [self._article_action(guild, trigger, a, old_images, gated) for a in acts]
         if sum(a["type"] == "count" for a in actions) > 1:
             raise ApplyError("An article counts once at most.")
         tz = zone((await db.get_settings(guild.id)).timezone, self.bot.config.default_timezone)
@@ -699,6 +701,7 @@ class Daisho(commands.Cog):
         if not isinstance(opts, list) or len(opts) > MAX_OPTIONS:
             raise ApplyError(f"A menu holds {MAX_OPTIONS} roles at most.")
         rows, seen = [], set()
+        gated = await self.bot.db.gated_roles(guild.id)
         for i, o in enumerate(opts, start=1):
             if not isinstance(o, dict):
                 raise ApplyError("That change arrived garbled; make it again.")
@@ -708,7 +711,7 @@ class Daisho(commands.Cog):
             if role.id in seen:
                 raise ApplyError(f"{role.name} is on the menu twice.")
             seen.add(role.id)
-            problem = self_serve_problem(role, guild.me)
+            problem = self_serve_problem(role, guild.me, gated)
             if problem:
                 raise ApplyError(problem)
             emoji = self._menu_emoji(guild, o.get("emoji"), role.name)
