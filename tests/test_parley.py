@@ -51,7 +51,7 @@ class FakeClaude:
     def __init__(self, script):
         self.script, self.calls = list(script), []
 
-    async def create(self, *, system, messages, tools=None, max_tokens=600, allow_tools=True):
+    async def create(self, *, system, messages, tools=None, max_tokens=600, allow_tools=True, **kw):
         self.calls.append({"system": system, "messages": [dict(m) for m in messages], "tools": tools,
                            "allow_tools": allow_tools})
         return self.script.pop(0)
@@ -113,6 +113,7 @@ class Msg:
 
     async def reply(self, text, **kw):
         self.replies.append(text)
+        self.reply_kw = kw
         return SimpleNamespace(id=1, author=SimpleNamespace(id=BOT_ID), content=text, reference=None)
 
 
@@ -248,7 +249,7 @@ async def test_without_kagi_there_is_no_search_tool(env):
     msg = Msg(guild, member(), f"<@{BOT_ID}> newest SoT season?", Chan())
     await cog.on_message(msg)
     call = cog.claude.calls[0]
-    assert "search_web" not in [t["name"] for t in call["tools"]] and "can't search the web" in call["system"]
+    assert "search_web" not in [t["name"] for t in call["tools"]] and "can't search the web" in " ".join(call["system"])
     assert msg.replies[0].startswith("From what I know")
 
 
@@ -288,3 +289,34 @@ async def test_deleting_the_question_still_counts(env):
     await cog.on_message(msg)
     day, _, _ = cog.today(await bot.db.get_settings(5))
     assert await bot.db.parley_replies(5, 1, day) == 1 and sent == ["<@1> Ahoy!"]
+
+
+async def test_a_reply_carries_confirm_buttons_for_what_needs_them(env):
+    """1.6.0: retiring a ship (or cancelling a voyage) is held for the member's Confirm button."""
+    bot, cog, guild = env
+    import discord.member
+    fake, discord.Member = discord.Member, discord.member.Member   # the ledger's commands need the real one
+    try:
+        await bot.load_extension("plunderbot.cogs.ledger")
+    finally:
+        discord.Member = fake
+    await bot.db.create_ship(guild_id=5, owner_id=1, name="Depth Charge", kind="Sloop", motto=None, image=None,
+                             created_at="2026-09-30T00:00:00+00:00")
+    asker = SimpleNamespace(id=1, bot=False, display_name="Boxer", voice=None, roles=[], get_role=lambda r: None,
+                            guild_permissions=SimpleNamespace(manage_messages=False, manage_guild=False,
+                                                              administrator=False, manage_channels=False))
+    cog.claude = FakeClaude([tool_call("ship", {"action": "retire", "ship": "Depth Charge"}),
+                             said("Press Confirm and she's retired, captain!")])
+    msg = Msg(guild, asker, f"<@{BOT_ID}> retire the Depth Charge", Chan())
+    await cog.on_message(msg)
+    second = cog.claude.calls[1]["messages"][-1]["content"][0]["content"]
+    assert second.startswith("Not done yet")
+    view = msg.reply_kw["view"]
+    assert len(view.children) == 2 and view.children[0].item.label == "Yes, retire Depth Charge (her ledger stays)"
+    assert not (await bot.db.ships(5, 1))[0].retired and len(cog.pending) == 1
+    # an answer with nothing to confirm has no buttons
+    cog.claude = FakeClaude([said("Ahoy!")])
+    plain = Msg(guild, asker, f"<@{BOT_ID}> hello there", Chan())
+    cog.last_asked.clear()
+    await cog.on_message(plain)
+    assert "view" not in plain.reply_kw

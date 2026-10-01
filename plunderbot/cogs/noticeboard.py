@@ -673,39 +673,47 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
                                                 view=FollowPicker(self, options), ephemeral=True)
 
     async def apply_follow(self, interaction: discord.Interaction, chosen_keys: list[str]) -> None:
-        guild, member = interaction.guild, interaction.user
         await interaction.response.defer()  # Discord allows 3 seconds; this can take longer
+        _, text = await self.follow_as(interaction.guild, interaction.user, chosen_keys)
+        await finish(interaction, content=text, view=None)
+
+    async def follow_as(self, guild: discord.Guild, member, chosen_keys: list[str]) -> tuple[bool, str]:
+        """Make a member follow exactly these games (ping role, then forum thread), for /follow, the Game
+        Index button and Parley (1.6.0). Returns (changed, what to tell them)."""
         entries = [e for e in await self.game_entries(guild, with_threads=False) if e["role_id"]]
         by_role = {e["role_id"]: e for e in entries}
         chosen = [e["role_id"] for e in entries if e["key"] in chosen_keys]
         add, remove = plan({r.id for r in member.roles}, list(by_role), chosen, "multi")
         if not add and not remove:
-            await finish(interaction, content=voice.say("colours_same"), view=None)
-            return
+            return False, voice.say("colours_same")
         add_roles = [guild.get_role(r) for r in add]
         remove_roles = [guild.get_role(r) for r in remove]
         gated = await self.bot.db.gated_roles(guild.id)
         if any(self_serve_problem(r, guild.me, gated) for r in add_roles + remove_roles):
-            await finish(interaction, content=voice.say("colours_cant"), view=None)
-            return
+            return False, voice.say("colours_cant")
         try:
             if remove_roles:
                 await member.remove_roles(*remove_roles, reason="Unfollowed a game")
             if add_roles:
                 await member.add_roles(*add_roles, reason="Followed a game")
         except discord.HTTPException:
-            await finish(interaction, content=voice.say("colours_cant"), view=None)
-            return
+            return False, voice.say("colours_cant")
         parts = []
         if add:
             parts.append("Following " + voice.join_names([by_role[r]["name"] for r in add]) + ".")
         if remove:
             parts.append("Stopped following " + voice.join_names([by_role[r]["name"] for r in remove]) + ".")
-        await finish(interaction, content=voice.say("follow_done", changes=" ".join(parts)), view=None)
         # Threads are a bonus, and slow one at a time, so they're sorted after the reply.
         task = asyncio.create_task(self.update_threads(guild, member, add, remove))
         self._background.add(task)
         task.add_done_callback(self._background.discard)
+        return True, voice.say("follow_done", changes=" ".join(parts))
+
+    async def following(self, guild: discord.Guild, member) -> tuple[list[dict], list[dict]]:
+        """(the games that can be followed, the ones this member follows)."""
+        entries = [e for e in await self.game_entries(guild, with_threads=False) if e["role_id"]]
+        wearing = {r.id for r in getattr(member, "roles", [])}
+        return entries, [e for e in entries if e["role_id"] in wearing]
 
     async def update_threads(self, guild: discord.Guild, member, add: list[int], remove: list[int]) -> None:
         entries = {e["role_id"]: e for e in await self.game_entries(guild) if e["role_id"]}

@@ -167,22 +167,91 @@ class ShipLedger(commands.Cog):
     async def ship_register(self, interaction: discord.Interaction, name: app_commands.Range[str, 1, 60],
                             kind: app_commands.Choice[str], motto: app_commands.Range[str, 1, 150] | None = None,
                             image: discord.Attachment | None = None) -> None:
-        name = _clean(name, 60)
-        mine = await self.bot.db.ships(interaction.guild_id, interaction.user.id)
-        if len(mine) >= MAX_SHIPS:
-            await interaction.response.send_message(voice.say("ship_too_many"), ephemeral=True)
-            return
-        if any(s.name.lower() == (name or "").lower() for s in mine):
-            await interaction.response.send_message(voice.say("ship_name_taken", ship=name), ephemeral=True)
+        problem = await self.register_problem(interaction.guild_id, interaction.user.id, name)
+        if problem:
+            await interaction.response.send_message(problem, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         picture = await self._save_image(interaction, image)
         if picture is False:
             return
-        ship = await self.bot.db.create_ship(guild_id=interaction.guild_id, owner_id=interaction.user.id, name=name,
-                                             kind=kind.value, motto=_clean(motto, 150), image=picture,
+        _, text = await self.register_as(interaction.guild_id, interaction.user.id, name, kind.value, motto, picture)
+        await interaction.followup.send(text, ephemeral=True)
+
+    # Ships and pirate profiles as the member, for the slash commands and Parley (1.6.0).
+    async def register_problem(self, guild_id: int, user_id: int, name: str | None) -> str | None:
+        name = _clean(name, 60)
+        if not name:
+            return voice.say("ship_unknown")
+        mine = await self.bot.db.ships(guild_id, user_id)
+        if len(mine) >= MAX_SHIPS:
+            return voice.say("ship_too_many")
+        if any(s.name.lower() == name.lower() for s in mine):
+            return voice.say("ship_name_taken", ship=name)
+        return None
+
+    async def register_as(self, guild_id: int, user_id: int, name: str, kind: str, motto: str | None = None,
+                          picture: str | None = None) -> tuple[bool, str]:
+        problem = await self.register_problem(guild_id, user_id, name)
+        if problem:
+            return False, problem
+        if kind not in KINDS:
+            return False, f"A ship is a {', '.join(KINDS[:-1])} or {KINDS[-1]}."
+        ship = await self.bot.db.create_ship(guild_id=guild_id, owner_id=user_id, name=_clean(name, 60),
+                                             kind=kind, motto=_clean(motto, 150), image=picture,
                                              created_at=iso(now_utc()))
-        await interaction.followup.send(voice.say("ship_registered", ship=ship_label(ship)), ephemeral=True)
+        return True, voice.say("ship_registered", ship=ship_label(ship))
+
+    async def editable_ship(self, guild_id: int, member, value: str | None, *, retiring: bool = False,
+                            own_only: bool = False):
+        """(the ship, None) when this member may change it, else (None, why not). own_only: their own ships
+        only, even for a mod (Parley, so text slipped into a chat can't steer a mod into someone else's)."""
+        found = await self.find_ship(guild_id, value)
+        if found is None or (retiring and found.retired):
+            return None, voice.say("ship_unknown")
+        if found.owner_id != member.id and (own_only or not _is_mod(member)):
+            return None, voice.say("ship_not_yours")
+        return found, None
+
+    async def edit_as(self, guild_id: int, member, value: str | None, *, name: str | None = None,
+                      kind: str | None = None, motto: str | None = None, picture: str | None = None,
+                      own_only: bool = False) -> tuple[bool, str]:
+        found, problem = await self.editable_ship(guild_id, member, value, own_only=own_only)
+        if problem:
+            return False, problem
+        changes = {}
+        if name and _clean(name, 60):
+            changes["name"] = _clean(name, 60)
+        if kind:
+            if kind not in KINDS:
+                return False, f"A ship is a {', '.join(KINDS[:-1])} or {KINDS[-1]}."
+            changes["kind"] = kind
+        if motto:
+            changes["motto"] = None if motto.strip() == "-" else _clean(motto, 150)
+        if picture:
+            changes["image"] = picture
+        if not changes:
+            return False, "Nothing to change."
+        found = await self.bot.db.update_ship(found.id, **changes)
+        return True, voice.say("ship_updated", ship=ship_label(found))
+
+    async def retire_as(self, guild_id: int, member, value: str | None, own_only: bool = False) -> tuple[bool, str]:
+        found, problem = await self.editable_ship(guild_id, member, value, retiring=True, own_only=own_only)
+        if problem:
+            return False, problem
+        await self.bot.db.update_ship(found.id, retired=1)
+        return True, voice.say("ship_retired", ship=ship_label(found))
+
+    async def pirate_set_as(self, guild_id: int, user_id: int, gamertag: str | None, motto: str | None) -> str:
+        old_tag, old_motto = await self.bot.db.pirate_profile(guild_id, user_id)
+
+        def pick(new, old, limit):
+            if new is None:
+                return old
+            return None if new.strip() == "-" else _clean(new, limit)
+
+        await self.bot.db.set_pirate_profile(guild_id, user_id, pick(gamertag, old_tag, 40), pick(motto, old_motto, 150))
+        return voice.say("pirate_saved")
 
     async def _save_image(self, interaction, image):
         """The stored picture name, None for none, or False after telling the member it won't do."""
@@ -204,40 +273,22 @@ class ShipLedger(commands.Cog):
                         kind: app_commands.Choice[str] | None = None,
                         motto: app_commands.Range[str, 1, 150] | None = None,
                         image: discord.Attachment | None = None) -> None:
-        found = await self.find_ship(interaction.guild_id, ship)
-        if found is None:
-            await interaction.response.send_message(voice.say("ship_unknown"), ephemeral=True)
-            return
-        if found.owner_id != interaction.user.id and not _is_mod(interaction.user):
-            await interaction.response.send_message(voice.say("ship_not_yours"), ephemeral=True)
+        found, problem = await self.editable_ship(interaction.guild_id, interaction.user, ship)
+        if problem:
+            await interaction.response.send_message(problem, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        changes = {}
-        if name:
-            changes["name"] = _clean(name, 60)
-        if kind:
-            changes["kind"] = kind.value
-        if motto:
-            changes["motto"] = None if motto.strip() == "-" else _clean(motto, 150)
         picture = await self._save_image(interaction, image)
         if picture is False:
             return
-        if picture:
-            changes["image"] = picture
-        found = await self.bot.db.update_ship(found.id, **changes)
-        await interaction.followup.send(voice.say("ship_updated", ship=ship_label(found)), ephemeral=True)
+        _, text = await self.edit_as(interaction.guild_id, interaction.user, str(found.id), name=name,
+                                     kind=kind.value if kind else None, motto=motto, picture=picture)
+        await interaction.followup.send(text, ephemeral=True)
 
     @ship.command(name="retire", description="Retire one of your ships (her ledger stays)")
     async def ship_retire(self, interaction: discord.Interaction, ship: str) -> None:
-        found = await self.find_ship(interaction.guild_id, ship)
-        if found is None or found.retired:
-            await interaction.response.send_message(voice.say("ship_unknown"), ephemeral=True)
-            return
-        if found.owner_id != interaction.user.id and not _is_mod(interaction.user):
-            await interaction.response.send_message(voice.say("ship_not_yours"), ephemeral=True)
-            return
-        await self.bot.db.update_ship(found.id, retired=1)
-        await interaction.response.send_message(voice.say("ship_retired", ship=ship_label(found)), ephemeral=True)
+        _, text = await self.retire_as(interaction.guild_id, interaction.user, ship)
+        await interaction.response.send_message(text, ephemeral=True)
 
     @ship.command(name="show", description="A ship's profile: her captain, plunder and trusted crew")
     @app_commands.describe(ship="Which ship (leave empty for your own)")
@@ -614,16 +665,8 @@ class ShipLedger(commands.Cog):
     async def pirate_set(self, interaction: discord.Interaction,
                          gamertag: app_commands.Range[str, 1, 40] | None = None,
                          motto: app_commands.Range[str, 1, 150] | None = None) -> None:
-        old_tag, old_motto = await self.bot.db.pirate_profile(interaction.guild_id, interaction.user.id)
-
-        def pick(new, old, limit):
-            if new is None:
-                return old
-            return None if new.strip() == "-" else _clean(new, limit)
-
-        await self.bot.db.set_pirate_profile(interaction.guild_id, interaction.user.id,
-                                             pick(gamertag, old_tag, 40), pick(motto, old_motto, 150))
-        await interaction.response.send_message(voice.say("pirate_saved"), ephemeral=True)
+        await interaction.response.send_message(
+            await self.pirate_set_as(interaction.guild_id, interaction.user.id, gamertag, motto), ephemeral=True)
 
 
 async def setup(bot) -> None:

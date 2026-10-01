@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.6.0 (2026-10-01): Ask PlunderBot for anything
+
+Pairs with The Magical Samurai 1.20.1 (the Swabbie's guide). Nothing to set up.
+
+**Parley does what members can do**
+
+- @mention PlunderBot (or reply to it) and ask in plain words for nearly anything its member commands and buttons do. It acts as you, through the same code and checks as the command or button, and never for anyone else:
+  - **Voyages:** plan one (now with a repeat and an end date), answer one, **edit** one you organized ("move it to 9pm", "3 seats", "every 2 weeks"), see a series' dates, **skip or put back a date**, and cancel.
+  - **Crews:** start, join, leave, close, and **rename** your session.
+  - **Music:** play and queue, plus **skip, pause, resume, stop, clear, remove, move, shuffle, repeat, seek and volume** ("a bit quieter" works). The DJ role applies as with the buttons. Lyrics stay with `/music lyrics`, which answers privately.
+  - **You:** set, show or clear your **time zone** and **birthday**.
+  - **Following games** and **self-serve roles** from the posted role menus, by name ("follow Helldivers", "give me the Xbox role"). Moderator roles, roles above PlunderBot's and the Gangplank's roles stay off limits, as on the menus.
+  - **Ships:** register, edit, retire and show; **pirate profiles:** show anyone's, set your gamertag and motto.
+- **Confirm buttons:** cancelling a voyage (or a whole series) and retiring a ship wait for **Yes** under PlunderBot's reply, which only the member who asked can press, within 10 minutes. **No** leaves it as it was.
+- By chat, changing a voyage or a ship is for its own organizer or owner only, even for mods (who keep `/voyage edit`, `/voyage cancel` and `/ship edit`), so words slipped into a conversation can't steer a mod into changing someone else's. Voyages, crews and role menus posted where not everyone can see stay out of reach, as in Parley's look-ups.
+- The eight tools (voyage, crew, music, me, follow, roles, ship, pirate) replace 1.3.1's six actions and `play_music`/`music_queue`. The rules say plainly that a tool's answer decides whether something was done.
+- **Prompt caching:** the tools and the rules (now separate from the time and who's asking) are marked for caching. They're just under Haiku 4.5's minimum for now, so each question costs about a tenth of a cent more than before; once they cross it, repeat questions within a few minutes cost a tenth as much for that part.
+
+**Under the hood**
+
+- The commands that only worked from a slash command now share their logic with Parley: `Voyages.plan_edit`/`edit_text`, `CrewCall.rename_as`, `Core.tz_set_as`/`tz_show_as`/`tz_clear_as`, `Birthdays.set_as`/`mine_as`/`remove_as`, `Noticeboard.follow_as`/`following`, `Colours.apply_as`, and `ShipLedger.register_as`/`edit_as`/`retire_as`/`pirate_set_as`. The slash commands behave as before, except `/ship edit` with nothing to change now says so.
+- `music.summary` (the queue Parley reads) adds the volume, repeat and whether it's paused.
+
 ## 1.5.0 (2026-10-01): Repeating voyages, pictures from the screens
 
 Pairs with The Magical Samurai 1.18.0.

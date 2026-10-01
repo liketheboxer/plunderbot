@@ -130,23 +130,31 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
         return out
 
     async def apply(self, interaction: discord.Interaction, menu_id: int, chosen: list[int]) -> None:
-        guild, member = interaction.guild, interaction.user
         await interaction.response.defer()  # Discord allows 3 seconds; role changes can take longer
         menu = await self.bot.db.get_menu(menu_id)
         if menu is None:
             await finish(interaction, content=voice.say("colours_gone"), view=None)
             return
+        _, text, zones = await self.apply_as(interaction.guild, interaction.user, menu, chosen)
+        if zones:
+            await finish(interaction, content=text + "\n\n" + voice.say("colours_zone_prompt"),
+                                                    view=ZonePicker(self, zones))
+        else:
+            await finish(interaction, content=text, view=None)
+
+    async def apply_as(self, guild: discord.Guild, member, menu: RoleMenu,
+                       chosen: list[int]) -> tuple[bool, str, list[tuple[str, str]]]:
+        """Set exactly these roles of a menu on a member, for the menu's picker and Parley (1.6.0).
+        Returns (changed, what to tell them, zones to offer when a region spans several)."""
         live = [o.role_id for o in menu.options if guild.get_role(o.role_id) is not None]
         add, remove = plan({r.id for r in member.roles}, live, chosen, menu.mode)
         if not add and not remove:
-            await finish(interaction, content=voice.say("colours_same"), view=None)
-            return
+            return False, voice.say("colours_same"), []
         add_roles = [guild.get_role(r) for r in add]
         remove_roles = [guild.get_role(r) for r in remove]
         me, gated = guild.me, await self.bot.db.gated_roles(guild.id)
         if any(self_serve_problem(r, me, gated) for r in add_roles + remove_roles):
-            await finish(interaction, content=voice.say("colours_cant"), view=None)
-            return
+            return False, voice.say("colours_cant"), []
         try:
             if remove_roles:
                 await member.remove_roles(*remove_roles, reason=f"Colours: {menu.title}")
@@ -154,20 +162,13 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
                 await member.add_roles(*add_roles, reason=f"Colours: {menu.title}")
         except discord.HTTPException as e:
             log.warning("Couldn't change %s's roles from menu %s: %s", member.id, menu.id, e)
-            await finish(interaction, content=voice.say("colours_cant"), view=None)
-            return
+            return False, voice.say("colours_cant"), []
         parts = []
         if add_roles:
             parts.append("Now wearing " + voice.join_names([r.mention for r in add_roles]) + ".")
         if remove_roles:
             parts.append("Took off " + voice.join_names([r.mention for r in remove_roles]) + ".")
-        text = voice.say("colours_done", changes=" ".join(parts))
-        zones = await self.broad_zones(guild, member, add_roles)
-        if zones:
-            await finish(interaction, content=text + "\n\n" + voice.say("colours_zone_prompt"),
-                                                    view=ZonePicker(self, zones))
-        else:
-            await finish(interaction, content=text, view=None)
+        return True, voice.say("colours_done", changes=" ".join(parts)), await self.broad_zones(guild, member, add_roles)
 
     async def broad_zones(self, guild: discord.Guild, member, added: list[discord.Role]) -> list[tuple[str, str]]:
         """If they just picked a region too broad for one zone (and haven't chosen a zone themselves),

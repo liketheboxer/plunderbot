@@ -23,6 +23,7 @@
 | 1.3.1 | Ask PlunderBot: Parley plans and answers voyages, calls and joins crews, and queues songs, in plain speech |
 | 1.4.0 | The Jukebox screen in Daisho: the queue live, add songs, and steer by Discord's rules (with The Magical Samurai 1.17.0) |
 | 1.4.1 | Security check fixes: music links stay on the public internet, Gangplank newcomers can't use commands, Parley and Ledger limits, role hierarchy (with The Magical Samurai 1.17.1) |
+| 1.6.0 | Ask PlunderBot for anything a member can do: voyage edits and series, crew rename, every music control, time zone, birthday, following games, self-serve roles, ships and pirate profiles; Confirm buttons for cancelling and retiring; prompt caching |
 | 1.5.0 | Repeating voyages: every N weeks, the nth weekday of the month, an end date, skipped dates, `/voyage series`; pictures for voyages and Notice Board sections uploaded in Daisho (with The Magical Samurai 1.18.0) |
 
 ## Later

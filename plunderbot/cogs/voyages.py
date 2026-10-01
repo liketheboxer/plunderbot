@@ -79,6 +79,13 @@ def _can_manage(member, v: Voyage) -> bool:
 NO_END = ("never", "none", "no end", "-")
 
 
+class EditRefused(Exception):
+    """An edit that can't be made, with the voice line that says why (1.6.0)."""
+    def __init__(self, key: str, **kw):
+        super().__init__(key)
+        self.key, self.kw = key, kw
+
+
 def _day(text: str, today: Date) -> Date:
     """A date picked from the list (2026-10-10) or typed (10/10, saturday)."""
     try:
@@ -562,49 +569,14 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         v = await self._fetch_manageable(interaction, voyage)
         if v is None:
             return
-        tz, whose = await self.reading_zone(interaction.user.id, v.guild_id)
-        changes: dict = {}
-        starts = None
         try:
-            if date or time:
-                if time:
-                    time_text, typed_zone = split_zone(time)
-                    if typed_zone is not None:
-                        tz, whose = typed_zone, "typed"
-                local = datetime.fromisoformat(v.starts_at).astimezone(tz)
-                day = parse_date(date, datetime.now(tz).date()) if date else local.date()
-                at = parse_time(time_text) if time else local.time().replace(tzinfo=None)
-                starts = to_utc(day, at, tz)
-                if starts <= now_utc() + timedelta(minutes=1):
-                    await interaction.response.send_message(voice.say("voyage_bad_time"), ephemeral=True)
-                    return
-                # Reminders count again from the new time, starting now.
-                changes.update(starts_at=iso(starts), reminders_sent="")
-            if reminders is not None:
-                changes.update(reminders=",".join(str(m) for m in parse_reminders(reminders)), reminders_sent="")
-            skip_this = False
-            if repeat or repeat_ends or skip or unskip or (starts is not None and v.repeat != "none"):
-                stz = await self.tz(v.guild_id)
-                today = datetime.now(stz).date()
-                ends = (repeat_ends or "").strip().lower()
-                series, skip_this = await self.plan_series(
-                    dataclasses.replace(v, starts_at=changes.get("starts_at", v.starts_at)), stz, repeat=repeat,
-                    until=_day(repeat_ends, today).isoformat() if ends and ends not in NO_END else None,
-                    clear_until=ends in NO_END,
-                    skip=[_day(skip, today)] if skip else [], unskip=[_day(unskip, today)] if unskip else [],
-                    moved=starts is not None)
-                changes.update(series)
-        except ParseError as e:
-            await interaction.response.send_message(voice.say("voyage_bad_input", error=str(e)), ephemeral=True)
+            changes, skip_this, tz, whose, starts = await self.plan_edit(
+                v, interaction.user.id, title=title, date=date, time=time, description=description,
+                reminders=reminders, seats=seats, notify=notify.value if notify else None, repeat=repeat,
+                repeat_ends=repeat_ends, skip=skip, unskip=unskip)
+        except EditRefused as e:
+            await interaction.response.send_message(voice.say(e.key, **e.kw), ephemeral=True)
             return
-        if title:
-            changes["title"] = title.strip()
-        if description:
-            changes["description"] = description
-        if seats:
-            changes["capacity"] = seats
-        if notify:
-            changes["ping_role"] = notify.value
         if remove_image and image is None:
             changes["image"] = None
         if not changes and image is None and not skip_this:
@@ -622,6 +594,64 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         if v is None:  # it started meanwhile
             await interaction.followup.send(voice.say("voyage_over"), ephemeral=True)
             return
+        await interaction.followup.send(await self.edit_text(v, changes, skip_this, tz, whose, starts), ephemeral=True)
+
+    async def plan_edit(self, v: Voyage, user_id: int, *, title: str | None = None, date: str | None = None,
+                        time: str | None = None, description: str | None = None, reminders: str | None = None,
+                        seats: int | None = None, notify: str | None = None, repeat: str | None = None,
+                        repeat_ends: str | None = None, skip: str | None = None, unskip: str | None = None):
+        """Work out the changes an edit makes, as /voyage edit and Parley (1.6.0) both ask for it: the times
+        read in the member's own zone (or one they typed). Returns (changes, skip_this, tz, whose, starts);
+        raises EditRefused with the voice line to answer with."""
+        tz, whose = await self.reading_zone(user_id, v.guild_id)
+        changes: dict = {}
+        starts = None
+        skip_this = False
+        try:
+            if date or time:
+                time_text = None
+                if time:
+                    time_text, typed_zone = split_zone(time)
+                    if typed_zone is not None:
+                        tz, whose = typed_zone, "typed"
+                local = datetime.fromisoformat(v.starts_at).astimezone(tz)
+                day = parse_date(date, datetime.now(tz).date()) if date else local.date()
+                at = parse_time(time_text) if time else local.time().replace(tzinfo=None)
+                starts = to_utc(day, at, tz)
+                if starts <= now_utc() + timedelta(minutes=1):
+                    raise EditRefused("voyage_bad_time")
+                # Reminders count again from the new time, starting now.
+                changes.update(starts_at=iso(starts), reminders_sent="")
+            if reminders is not None:
+                changes.update(reminders=",".join(str(m) for m in parse_reminders(reminders)), reminders_sent="")
+            if repeat or repeat_ends or skip or unskip or (starts is not None and v.repeat != "none"):
+                stz = await self.tz(v.guild_id)
+                today = datetime.now(stz).date()
+                ends = (repeat_ends or "").strip().lower()
+                series, skip_this = await self.plan_series(
+                    dataclasses.replace(v, starts_at=changes.get("starts_at", v.starts_at)), stz, repeat=repeat,
+                    until=_day(repeat_ends, today).isoformat() if ends and ends not in NO_END else None,
+                    clear_until=ends in NO_END,
+                    skip=[_day(skip, today)] if skip else [], unskip=[_day(unskip, today)] if unskip else [],
+                    moved=starts is not None)
+                changes.update(series)
+        except ParseError as e:
+            raise EditRefused("voyage_bad_input", error=str(e)) from e
+        if title and title.strip():
+            changes["title"] = " ".join(title.split())[:80]
+        if description and description.strip():
+            changes["description"] = description.strip()[:1000]
+        if seats:
+            if not 1 <= int(seats) <= 99:
+                raise EditRefused("voyage_bad_input", error="seats must be between 1 and 99")
+            changes["capacity"] = int(seats)
+        if notify:
+            if notify not in PINGS:
+                raise EditRefused("voyage_bad_input", error=f"notify must be one of {', '.join(PINGS)}")
+            changes["ping_role"] = notify
+        return changes, skip_this, tz, whose, starts
+
+    async def edit_text(self, v: Voyage, changes: dict, skip_this: bool, tz, whose: str, starts) -> str:
         if skip_this:
             text = voice.say("voyage_cancel_done")
         else:
@@ -631,7 +661,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             text += "\n" + self.zone_note(tz, whose, starts)
         if {"repeat", "repeat_until", "skips"} & set(changes) or skip_this:
             text += "\n" + self.series_text(v, await self.series_dates(v, count=5))
-        await interaction.followup.send(text, ephemeral=True)
+        return text
 
     @app_commands.command(name="series", description="See the coming dates of a repeating voyage")
     @app_commands.describe(voyage="Which voyage")

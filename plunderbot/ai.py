@@ -37,10 +37,21 @@ class Claude(_Client):
         super().__init__()
         self.api_key, self.model = api_key, model
 
-    async def create(self, *, system: str, messages: list[dict], tools: list[dict] | None = None,
-                     max_tokens: int = 600, allow_tools: bool = True, tool_choice: dict | None = None) -> dict:
+    async def create(self, *, system: str | list[str], messages: list[dict], tools: list[dict] | None = None,
+                     max_tokens: int = 600, allow_tools: bool = True, tool_choice: dict | None = None,
+                     cache: bool = False) -> dict:
+        """One Messages API call. With cache (1.6.0), the tools and the first part of the system prompt
+        (system as [rules, moment]) are cached, so a long tool list costs a tenth as much after the first
+        question; below the model's minimum length Claude just doesn't cache, which costs nothing."""
+        if isinstance(system, (list, tuple)):
+            blocks = [{"type": "text", "text": t} for t in system if t]
+            if cache and blocks:
+                blocks[0]["cache_control"] = {"type": "ephemeral"}
+            system = blocks
         body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": messages}
         if tools:
+            if cache:
+                tools = [*tools[:-1], {**tools[-1], "cache_control": {"type": "ephemeral"}}]
             body["tools"] = tools
             if tool_choice is not None:  # e.g. {"type": "tool", "name": ...} to always fill in a form
                 body["tool_choice"] = tool_choice

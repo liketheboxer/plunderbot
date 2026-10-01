@@ -296,6 +296,10 @@ class Music(commands.Cog):
         lines += [f"{i}. {x.title}" for i, x in enumerate(p.queue.tracks[:upcoming], 1)]
         if len(p.queue.tracks) > upcoming:
             lines.append(f"...and {len(p.queue.tracks) - upcoming} more")
+        vc = getattr(self.bot.get_guild(guild_id), "voice_client", None) if hasattr(self.bot, "get_guild") else None
+        paused = bool(vc is not None and getattr(vc, "is_paused", lambda: False)())
+        lines.append(f"Volume {round(p.volume * 100)}%, repeat {REPEAT_LABEL[p.queue.repeat].lower()}"
+                     + (", paused" if paused else "") + ".")
         return "\n".join(lines)
 
     async def state(self, guild: discord.Guild) -> dict:

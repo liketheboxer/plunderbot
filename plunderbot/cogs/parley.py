@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -20,11 +21,43 @@ from ..ai import Claude, Kagi
 from ..birthday_logic import upcoming, zone
 from ..discord_util import addressed_to
 from ..parley_logic import (COMMANDS_HELP, COOLDOWN_SECONDS, MAX_ROUNDS, TOOLS, build_messages, cost, refusal,
-                            reply_text, safe, strip_bot_mention, system_prompt)
-from ..parley_actions import ACTION_NAMES, ACTION_TOOLS, act
+                            reply_text, safe, strip_bot_mention, system_blocks)
+from ..parley_actions import ACTION_NAMES, ACTION_TOOLS, Pending, Turn, act
 from ..voyage_logic import zone_from_name, zone_label
 
 log = logging.getLogger("plunderbot.parley")
+
+
+class ConfirmButton(discord.ui.DynamicItem[discord.ui.Button], template=r"parley:(?P<op>ok|no):(?P<token>[0-9a-f]{12})"):
+    """Confirm or Cancel under a Parley reply that's waiting to cancel a voyage or retire a ship (1.6.0).
+    Only the member who asked can press it; the action itself is held in memory for 10 minutes."""
+
+    def __init__(self, op: str, token: str, label: str | None = None):
+        style = discord.ButtonStyle.danger if op == "ok" else discord.ButtonStyle.secondary
+        super().__init__(discord.ui.Button(label=(label or ("Confirm" if op == "ok" else "Cancel"))[:80],
+                                           style=style, custom_id=f"parley:{op}:{token}"))
+        self.op, self.token = op, token
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str]):
+        return cls(match["op"], match["token"], item.label)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog = interaction.client.get_cog("Parley")
+        if cog is None:
+            await interaction.response.send_message(voice.say("error"), ephemeral=True)
+            return
+        await cog.on_confirm(interaction, self.op, self.token)
+
+
+def confirm_view(pending: list[Pending]) -> discord.ui.View | None:
+    if not pending:
+        return None
+    view = discord.ui.View(timeout=None)
+    for i, p in enumerate(pending):
+        view.add_item(ConfirmButton("ok", p.token, f"Yes, {p.what}"))
+        view.add_item(ConfirmButton("no", p.token, "No, leave it" if len(pending) == 1 else f"No ({i + 1})"))
+    return view
 
 
 class Parley(commands.Cog):
@@ -36,6 +69,11 @@ class Parley(commands.Cog):
         self.last_asked: dict[int, float] = {}
         self.lock = asyncio.Lock()  # one conversation at a time keeps spending predictable
         self._background: set = set()
+        self.pending: dict[str, Pending] = {}      # waiting on a Confirm button (1.6.0)
+        self.groups: dict[str, list[str]] = {}     # token -> the tokens under the same reply
+
+    async def cog_load(self) -> None:
+        self.bot.add_dynamic_items(ConfirmButton)
 
     async def cog_unload(self) -> None:
         for client in (self.claude, self.kagi):
@@ -127,26 +165,85 @@ class Parley(commands.Cog):
         asker_zone = zone_label(zone_from_name(saved), local) if saved else ""
         lookups_left = (max(0, s.parley_kagi_daily - await self.bot.db.parley_lookups(guild.id, day))
                         if self.kagi else None)
-        system = system_prompt(server=guild.name, now_local=local, zone_label=local.strftime("%Z"),
-                               asker=author.display_name, asker_zone=asker_zone, lookups_left=lookups_left,
-                               cusses=voice.CUSSES)
+        system = list(system_blocks(server=guild.name, now_local=local, zone_label=local.strftime("%Z"),
+                                    asker=author.display_name, asker_zone=asker_zone, lookups_left=lookups_left,
+                                    cusses=voice.CUSSES))
         messages = build_messages(history, question, author.display_name)
+        turn = Turn(spawn=self.spawn)
         async with message.channel.typing():
-            text = await self.converse(guild, s, system, messages, day, month, author, message.channel)
+            text = await self.converse(guild, s, system, messages, day, month, author, message.channel, turn)
+        view = confirm_view(self.hold(turn.pending))
+        extra = {"view": view} if view else {}
         try:
             await message.reply(safe(text) or voice.say("parley_error"), mention_author=False,
-                                allowed_mentions=discord.AllowedMentions.none())
+                                allowed_mentions=discord.AllowedMentions.none(), **extra)
         except discord.NotFound:       # they deleted the question: answer in the channel, saying whom to
             await message.channel.send(f"<@{author.id}> " + (safe(text) or voice.say("parley_error")),
-                                       allowed_mentions=discord.AllowedMentions.none())
+                                       allowed_mentions=discord.AllowedMentions.none(), **extra)
 
-    async def converse(self, guild, s, system: str, messages: list[dict], day: str, month: str,
-                       author=None, channel=None) -> str:
+    # ------------------------------------------------------------ Confirm buttons (1.6.0)
+    def spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    def hold(self, pending: list[Pending]) -> list[Pending]:
+        """Keep actions waiting for their Confirm button, dropping any that have run out of time."""
+        now = time.time()
+        for token in [t for t, p in self.pending.items() if p.expires < now]:
+            self.pending.pop(token, None)
+            self.groups.pop(token, None)
+        tokens = [p.token for p in pending]
+        for p in pending:
+            self.pending[p.token] = p
+            self.groups[p.token] = tokens
+        return pending
+
+    async def on_confirm(self, interaction: discord.Interaction, op: str, token: str) -> None:
+        p = self.pending.get(token)
+        if p is None or p.expires < time.time() or interaction.guild is None or p.guild_id != interaction.guild.id:
+            self.pending.pop(token, None)
+            self.groups.pop(token, None)
+            await interaction.response.send_message(voice.say("parley_confirm_gone"), ephemeral=True)
+            return
+        if interaction.user.id != p.user_id:
+            await interaction.response.send_message(voice.say("parley_confirm_not_yours", member=f"<@{p.user_id}>"),
+                                                    ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            return
+        self.pending.pop(token, None)
+        group = self.groups.pop(token, [token])
+        await interaction.response.defer()
+        if op == "ok":
+            try:
+                result = await act(self.bot, interaction.guild, interaction.user, interaction.channel, p.tool,
+                                   p.args, confirmed=True)
+            except Exception:
+                log.exception("Confirmed Parley action %s failed", p.tool)
+                result = voice.say("parley_error")
+            line = f"✅ {result}"
+        else:
+            line = f"Left as it was: didn't {p.what}."
+        rest = [self.pending[t] for t in group if t in self.pending]
+        line = safe(line)[:900]
+        before = (interaction.message.content or "") if interaction.message else ""
+        room = 1900 - len(line) - 2
+        if len(before) > room:   # the result always shows; the reply above it gives way
+            before = before[:max(0, room - 1)].rsplit(" ", 1)[0] + "…"
+        content = f"{before}\n\n{line}" if before else line
+        try:
+            await interaction.message.edit(content=content, view=confirm_view(rest),
+                                           allowed_mentions=discord.AllowedMentions.none())
+        except (discord.HTTPException, AttributeError):
+            await interaction.followup.send(safe(line), ephemeral=True)
+
+    async def converse(self, guild, s, system, messages: list[dict], day: str, month: str,
+                       author=None, channel=None, turn: Turn | None = None) -> str:
         tools = (TOOLS if self.kagi else [t for t in TOOLS if t["name"] != "search_web"]) + ACTION_TOOLS
         for round_ in range(MAX_ROUNDS + 1):
             last = round_ == MAX_ROUNDS
             async with self.lock:
-                resp = await self.claude.create(system=system, messages=messages, tools=tools, allow_tools=not last)
+                resp = await self.claude.create(system=system, messages=messages, tools=tools, allow_tools=not last,
+                                                cache=True)
                 usage = resp.get("usage") or {}
                 await self.bot.db.add_parley_spend(guild.id, month, cost(usage), usage.get("input_tokens", 0),
                                                    usage.get("output_tokens", 0))
@@ -160,7 +257,7 @@ class Parley(commands.Cog):
                     continue
                 try:
                     out = await self.run_tool(guild, s, block.get("name"), block.get("input") or {}, day,
-                                              author, channel)
+                                              author, channel, turn)
                 except Exception as e:
                     log.warning("Parley tool %s failed: %s", block.get("name"), e, exc_info=True)
                     out = "That didn't work because of a problem inside PlunderBot; say so and suggest the slash command."
@@ -196,27 +293,10 @@ class Parley(commands.Cog):
         return "Busiest first:\n" + "\n".join(lines)
 
     async def run_tool(self, guild: discord.Guild, s, name: str, args: dict, day: str, author=None,
-                       channel=None) -> str:
+                       channel=None, turn: Turn | None = None) -> str:
         db = self.bot.db
         if name in ACTION_NAMES:
-            return await act(self.bot, guild, author, channel, name, args)
-        if name in ("play_music", "music_queue"):
-            music = self.bot.get_cog("Music")
-            if music is None:
-                return "Music isn't running."
-            if name == "music_queue":
-                return music.summary(guild.id)
-            if author is None:
-                return "You can only queue music for someone who asked."
-            query = " ".join(str(args.get("query") or "").split())[:200]
-            if not query:
-                return "Say what to play."
-            ok, text, start = await music.enqueue(guild, author, channel, query, bool(args.get("next")))
-            if ok and start:   # start playing without holding up the reply
-                task = asyncio.create_task(music.advance(guild, music.players[guild.id]))
-                self._background.add(task)
-                task.add_done_callback(self._background.discard)
-            return ("Done: " if ok else "It didn't work: ") + text
+            return await act(self.bot, guild, author, channel, name, args, turn or Turn(spawn=self.spawn))
         now = datetime.now(timezone.utc)
         if name == "upcoming_voyages":
             from ..crew_logic import iso

@@ -348,6 +348,12 @@ LINES: dict[str, list[str]] = {
     "parley_error": [
         "{cuss} My gears jammed trying to answer that. Try again in a moment?",
     ],
+    "parley_confirm_gone": [
+        "{cuss} That one's run out of time (or I've been rebooted since). Just ask me again!",
+    ],
+    "parley_confirm_not_yours": [
+        "Only {member} can answer that one, matey.",
+    ],
     "ledger_sail_reminder": [
         "📸 {captain}, one small favour for the ledger: before you leave the game, open the Captain's Log and "
         "screenshot the two-page spread with your Gold. Post it here afterwards with `/ship log`!",

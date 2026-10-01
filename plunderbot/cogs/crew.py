@@ -304,23 +304,29 @@ class CrewCall(commands.GroupCog, group_name="crew", group_description="Muster a
     @app_commands.describe(name="The new name; leave empty to go back to the default")
     async def rename(self, interaction: discord.Interaction,
                      name: app_commands.Range[str, 1, 60] | None = None) -> None:
-        crew = await self.bot.db.active_crew_led_by(interaction.guild_id, interaction.user.id)
+        await interaction.response.defer(ephemeral=True)   # the card is edited before the answer
+        _, text = await self.rename_as(interaction.guild, interaction.user, name)
+        await interaction.followup.send(text, ephemeral=True)
+
+    async def rename_as(self, guild: discord.Guild, member, name: str | None) -> tuple[bool, str]:
+        """Rename the session a member is captaining (None: back to the default), for /crew rename and
+        Parley (1.6.0)."""
+        crew = await self.bot.db.active_crew_led_by(guild.id, member.id)
         if crew is None:
-            await interaction.response.send_message(voice.say("crew_none"), ephemeral=True)
-            return
+            return False, voice.say("crew_none")
         crew = await self.bot.db.update_crew(crew.id, title=clean_title(name))
-        await interaction.response.send_message(voice.say("crew_renamed"), ephemeral=True)
-        await self.refresh_card(interaction.guild, crew)
-        vc = interaction.guild.get_channel(crew.voice_channel_id) if crew.voice_channel_id else None
+        await self.refresh_card(guild, crew)
+        vc = guild.get_channel(crew.voice_channel_id) if crew.voice_channel_id else None
         if vc is not None:
             profile = games.get(crew.game_key)
-            channel_emoji, _ = await self.emoji_for(interaction.guild_id, profile, crew.size_label)
-            new_name = voice_channel_name(profile, crew.size_label, interaction.user.display_name,
+            channel_emoji, _ = await self.emoji_for(guild.id, profile, crew.size_label)
+            new_name = voice_channel_name(profile, crew.size_label, member.display_name,
                                           channel_emoji, crew.title)
             # Discord allows two channel renames per ten minutes, so don't hold anything up waiting.
             task = asyncio.create_task(self._rename_channel(vc, new_name))
             self._background.add(task)
             task.add_done_callback(self._background.discard)
+        return True, voice.say("crew_renamed")
 
     async def _rename_channel(self, vc, new_name: str) -> None:
         try:

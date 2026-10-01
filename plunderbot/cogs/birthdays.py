@@ -36,45 +36,45 @@ class Birthdays(commands.GroupCog, group_name="birthday", group_description="You
     @app_commands.choices(month=MONTH_CHOICES)
     async def set_birthday(self, interaction: discord.Interaction, month: app_commands.Choice[int],
                            day: app_commands.Range[int, 1, 31]) -> None:
-        m = month.value
-        if not valid_date(m, day):
-            await interaction.response.send_message(
-                voice.say("birthday_invalid", month_name=voice.MONTH_NAMES[m - 1], day=day), ephemeral=True)
-            return
-        gid, uid = interaction.guild_id, interaction.user.id
+        await interaction.response.send_message(
+            await self.set_as(interaction.guild_id, interaction.user.id, month.value, day), ephemeral=True)
+
+    @app_commands.command(name="remove", description="Remove your birthday from the ledger")
+    async def remove_birthday(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(await self.remove_as(interaction.guild_id, interaction.user.id),
+                                                ephemeral=True)
+
+    @app_commands.command(name="mine", description="See the birthday PlunderBot has for you")
+    async def my_birthday(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(await self.mine_as(interaction.guild_id, interaction.user.id),
+                                                ephemeral=True)
+
+    # A member's own birthday, for the slash commands and Parley (1.6.0).
+    async def set_as(self, gid: int, uid: int, m: int, day: int) -> str:
+        if not 1 <= m <= 12 or not valid_date(m, day):
+            return voice.say("birthday_invalid", month_name=voice.MONTH_NAMES[m - 1] if 1 <= m <= 12 else str(m),
+                             day=day)
         had = await self.bot.db.get_birthday(gid, uid)
         if had == (m, day):
-            await interaction.response.send_message(voice.say("birthday_mine", date=voice.format_date(m, day)),
-                                                    ephemeral=True)
-            return
+            return voice.say("birthday_mine", date=voice.format_date(m, day))
         now = datetime.now(timezone.utc)
         last = await self.bot.db.last_birthday_change(gid, uid)
         allowed, new_window, locked_until = change_allowed(datetime.fromisoformat(last) if last else None, now)
         if not allowed:
-            await interaction.response.send_message(
-                voice.say("birthday_too_soon", date=voice.format_date(locked_until.month, locked_until.day)),
-                ephemeral=True)
-            return
+            return voice.say("birthday_too_soon", date=voice.format_date(locked_until.month, locked_until.day))
         await self.bot.db.set_birthday(gid, uid, m, day)
         if new_window:
             await self.bot.db.record_birthday_change(gid, uid, now.isoformat())
         key = "birthday_changed" if had and had != (m, day) else "birthday_set"
-        await interaction.response.send_message(voice.say(key, date=voice.format_date(m, day)), ephemeral=True)
+        return voice.say(key, date=voice.format_date(m, day))
 
-    @app_commands.command(name="remove", description="Remove your birthday from the ledger")
-    async def remove_birthday(self, interaction: discord.Interaction) -> None:
-        removed = await self.bot.db.remove_birthday(interaction.guild_id, interaction.user.id)
-        key = "birthday_removed" if removed else "birthday_not_found"
-        await interaction.response.send_message(voice.say(key), ephemeral=True)
+    async def remove_as(self, gid: int, uid: int) -> str:
+        removed = await self.bot.db.remove_birthday(gid, uid)
+        return voice.say("birthday_removed" if removed else "birthday_not_found")
 
-    @app_commands.command(name="mine", description="See the birthday PlunderBot has for you")
-    async def my_birthday(self, interaction: discord.Interaction) -> None:
-        found = await self.bot.db.get_birthday(interaction.guild_id, interaction.user.id)
-        if not found:
-            await interaction.response.send_message(voice.say("birthday_not_found"), ephemeral=True)
-            return
-        await interaction.response.send_message(voice.say("birthday_mine", date=voice.format_date(*found)),
-                                                ephemeral=True)
+    async def mine_as(self, gid: int, uid: int) -> str:
+        found = await self.bot.db.get_birthday(gid, uid)
+        return voice.say("birthday_mine", date=voice.format_date(*found)) if found else voice.say("birthday_not_found")
 
     @app_commands.command(name="upcoming", description="The next birthdays on the ship's calendar")
     async def upcoming_birthdays(self, interaction: discord.Interaction) -> None:
