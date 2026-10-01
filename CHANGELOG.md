@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.2 (2026-10-01): Parley names voyages instead of guessing numbers
+
+- After "mark me Aboard for Community Night" worked, "mark me back to a maybe" went to a **guessed voyage number**: Parley doesn't remember the numbers it looked up in an earlier reply, picked an old voyage that had already sailed, and said Community Night had sailed. The voyage tool now takes the voyage by **name** (words from its title, filler like "voyage" or "the" ignored), and a name always wins over a number.
+- A voyage that's over now says which one it was (number, title and time), so a mix-up shows, and tells Parley to look it up by name again. Answers name the voyage too. Several matches are listed for the member to pick.
+- The rules tell Parley numbers from earlier replies aren't remembered, so it names voyages and never guesses.
+
 ## 1.6.1 (2026-10-01): Parley sees voyages further out
 
 - Parley's voyage look-up covered only the next 14 days, so asking to join a voyage a month away ("put me Aboard for Community Night") got "there aren't any voyages", and then a request for the voyage's number. It now lists the next 60 days by default, and when someone names a voyage it **searches every scheduled voyage by title or game, however far out**. With nothing in range it names the next one coming up.

@@ -26,6 +26,33 @@ from ..parley_actions import ACTION_NAMES, ACTION_TOOLS, Pending, Turn, act
 from ..voyage_logic import zone_from_name, zone_label
 
 log = logging.getLogger("plunderbot.parley")
+FILLER = {"the", "a", "an", "voyage", "voyages", "upcoming", "next", "one", "for", "to", "on", "my", "our",
+          "that", "this", "event", "session", "please"}
+
+
+async def public_voyages(db, guild) -> list:
+    """Scheduled voyages posted where everyone can see, soonest first."""
+    return sorted((v for v in await db.voyages_with_status("scheduled", guild_id=guild.id)
+                   if Parley.public_channel(guild, v.channel_id)), key=lambda v: v.starts_at)
+
+
+async def voyage_search(db, guild, search: str) -> list:
+    """Scheduled public voyages whose title or game has every word asked for ("community night voyage"
+    ignores "voyage"); failing that, the ones with the most of them, if that picks a clear few."""
+    words = [w for w in re.split(r"[^\w']+", (search or "").lower()) if w and w not in FILLER]
+    vs = await public_voyages(db, guild)
+    if not words:
+        return []
+
+    def text(v):
+        g = games.get(v.game_key)
+        return f"{v.title} {g.name if g else 'server event'} {g.short if g else ''}".lower()
+    hits = [(sum(w in text(v) for w in words), v) for v in vs]
+    full = [v for n, v in hits if n == len(words)]
+    if full:
+        return full
+    best = max((n for n, _ in hits), default=0)
+    return [v for n, v in hits if n == best] if best and best >= (len(words) + 1) // 2 else []
 
 
 class ConfirmButton(discord.ui.DynamicItem[discord.ui.Button], template=r"parley:(?P<op>ok|no):(?P<token>[0-9a-f]{12})"):
@@ -300,17 +327,11 @@ class Parley(commands.Cog):
         now = datetime.now(timezone.utc)
         if name == "upcoming_voyages":
             # 1.6.1: 60 days by default (was 14), and a search across every scheduled voyage, however far out
-            vs = sorted((v for v in await db.voyages_with_status("scheduled", guild_id=guild.id)
-                         if self.public_channel(guild, v.channel_id)), key=lambda v: v.starts_at)
+            vs = await public_voyages(db, guild)
             search = " ".join(str(args.get("search") or "").lower().split())[:80]
             days = args.get("days") if isinstance(args.get("days"), int) and 1 <= args["days"] <= 366 else 60
             if search:
-                words = [w for w in re.split(r"[^\w]+", search) if w]
-
-                def text(v):
-                    g = games.get(v.game_key)
-                    return f"{v.title} {g.name if g else 'server event'} {g.short if g else ''}".lower()
-                found = [v for v in vs if all(w in text(v) for w in words)]
+                found = await voyage_search(db, guild, search)
                 if not found:
                     return (f"No scheduled voyage matches \"{search}\" at any date. Scheduled voyages: "
                             + (", ".join(f"#{v.id} {v.title}" for v in vs[:20]) or "none") + ".")

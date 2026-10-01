@@ -39,12 +39,16 @@ ACTION_TOOLS = [
                     "one (answer: aboard, maybe, cant or clear); 'edit' one they organized (only the fields they "
                     "asked to change); 'series' to see a repeating voyage's coming dates; 'skip_date' or "
                     "'restore_date' for one date of a series they organized; 'cancel' one they organized "
-                    "(whole_series: true stops a repeating one for good). Get the voyage's number from "
-                    "upcoming_voyages first. Cancelling asks them to confirm with a button.",
+                    "(whole_series: true stops a repeating one for good). Say which voyage with name (words from "
+                    "its title), or a number you just looked up. Cancelling asks them to confirm with a button.",
      "input_schema": {"type": "object", "properties": {
          "action": {"type": "string", "enum": ["plan", "answer", "edit", "series", "skip_date", "restore_date",
                                                "cancel"]},
-         "voyage": {"type": "integer", "description": "The voyage's number (#12 in upcoming_voyages); not for plan."},
+         "name": {"type": "string", "description": "Which voyage, by words from its title (\"community night\"). "
+                                                  "Preferred: numbers from earlier replies aren't remembered, so "
+                                                  "never reuse or guess one. Not for plan."},
+         "voyage": {"type": "integer", "description": "Its number, only if you looked it up in this reply "
+                                                    "(#12 in upcoming_voyages)."},
          "title": {"type": "string"},
          "date": {"type": "string", "description": "As they said it: 'friday', 'tomorrow', '10/3'. For "
                                                     "skip_date/restore_date, the date to skip or put back."},
@@ -260,9 +264,9 @@ async def _skips_this_one(bot, guild, a: dict, name: str) -> bool:
     confirmed like a cancel."""
     if name != "voyage" or a.get("action") != "skip_date" or not a.get("date"):
         return False
-    v = await bot.db.get_voyage(int(a.get("voyage") or 0))
+    v, problem = await _find_voyage(bot, guild, a)
     cog = bot.get_cog("Voyages")
-    if v is None or cog is None or v.guild_id != guild.id or v.status != "scheduled" or v.repeat == "none":
+    if problem or cog is None or v.repeat == "none":
         return False
     from .cogs.voyages import _day
     tz = await cog.tz(v.guild_id)
@@ -307,11 +311,42 @@ async def _ask_first(bot, guild, author, name, a, turn: Turn | None) -> str:
 
 
 # ================================================================ voyages
+def _label(v) -> str:
+    return f"#{v.id} \"{v.title}\" (<t:{int(datetime.fromisoformat(v.starts_at).timestamp())}:F>)"
+
+
+async def _find_voyage(bot, guild, a: dict):
+    """The scheduled voyage a request means, by its name (1.6.2: preferred, since numbers from an earlier
+    reply aren't remembered and a guessed one is someone else's voyage) or its number. (voyage, None) or
+    (None, why not, naming what was found so Claude can tell a mix-up)."""
+    from .cogs.parley import voyage_search
+    name = " ".join(str(a.get("name") or "").split())[:80]
+    if name:
+        found = await voyage_search(bot.db, guild, name)
+        if len(found) == 1:
+            v = found[0]
+        elif not found:
+            return None, f"No scheduled voyage matches \"{name}\"; try other words from its title, or upcoming_voyages."
+        else:
+            return None, ("Several voyages match; ask which (or use its number): "
+                          + "; ".join(_label(x) for x in found[:8]) + ".")
+        if isinstance(a.get("voyage"), int) and a["voyage"] != v.id:
+            log.info("Parley gave voyage #%s but named #%s; using the name", a["voyage"], v.id)
+        return v, None
+    v = await bot.db.get_voyage(int(a.get("voyage") or 0))
+    if v is None or v.guild_id != guild.id or not _public(guild, v.channel_id):
+        return None, "There's no voyage with that number. Look it up by name with upcoming_voyages (search)."
+    if v.status != "scheduled":
+        return None, (f"Voyage {_label(v)} is {v.status}, so it can't be changed. If that isn't the one they meant, "
+                      "the number was wrong: look the voyage up by name with upcoming_voyages (search) and try again.")
+    return v, None
+
+
 async def _my_voyage(bot, guild, author, a: dict):
     """(the voyage, None) when the member organized it, else (None, why not)."""
-    v = await bot.db.get_voyage(int(a.get("voyage") or 0))
-    if v is None or v.guild_id != guild.id or v.status != "scheduled" or not _public(guild, v.channel_id):
-        return None, "There's no upcoming voyage with that number; check upcoming_voyages."
+    v, problem = await _find_voyage(bot, guild, a)
+    if problem:
+        return None, problem
     if v.organizer_id != author.id:
         # Mods can still change anyone's voyage with /voyage edit; by chat it's only your own, so text
         # slipped into a conversation can't steer a mod into changing someone else's.
@@ -327,18 +362,18 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
     if action == "plan":
         return await _plan_voyage(bot, cog, guild, author, channel, s, a)
     if action == "answer":
-        v = await bot.db.get_voyage(int(a.get("voyage") or 0))
-        if v is None or v.guild_id != guild.id or not _public(guild, v.channel_id):
-            return "There's no voyage with that number; check upcoming_voyages."
         answer = a.get("answer")
         if answer not in ("aboard", "maybe", "cant", "clear"):
             return "The answer must be aboard, maybe, cant or clear."
+        v, problem = await _find_voyage(bot, guild, a)
+        if problem:
+            return problem
         ok, reply = await cog.rsvp_as(guild, v.id, author.id, None if answer == "clear" else answer)
-        return reply if ok else "That voyage has already started or ended."
+        return f"Voyage {_label(v)}: {reply}" if ok else f"Voyage {_label(v)} has just started or ended."
     if action == "series":
-        v = await bot.db.get_voyage(int(a.get("voyage") or 0))
-        if v is None or v.guild_id != guild.id or v.status != "scheduled" or not _public(guild, v.channel_id):
-            return "There's no upcoming voyage with that number."
+        v, problem = await _find_voyage(bot, guild, a)
+        if problem:
+            return problem
         if v.repeat == "none":
             return f"\"{v.title}\" doesn't repeat."
         return cog.series_text(v, await cog.series_dates(v))

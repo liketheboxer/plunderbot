@@ -416,3 +416,37 @@ async def test_finding_voyages_far_out_and_by_name(env, monkeypatch):
             await bot.db.update_voyage(x.id, status="cancelled")
     nothing_soon = await look()
     assert "No voyages scheduled in the next 60 days" in nothing_soon and f"#{v.id} New Year's Eve Bash" in nothing_soon
+
+
+async def test_naming_a_voyage_beats_a_guessed_number(env, monkeypatch):
+    """1.6.2: "mark me back to a maybe" went to a guessed number (an old voyage that had sailed). Voyages can
+    be named, and a wrong number says which voyage it was, so the mix-up shows."""
+    bot, guild, here = await _setup(env, monkeypatch)
+    boxer = who(1)
+    today = datetime.now(timezone.utc).date()
+    for title, days in (("Fort Night", 3), ("Sea of Thieves - Brimstone Community Night!", 30)):
+        await act(bot, guild, boxer, here, "voyage", {"action": "plan", "title": title, "game": "SoT", "time": "2pm",
+                                                      "date": (today + timedelta(days=days)).strftime("%m/%d/%Y")})
+    fort, night = sorted(await bot.db.voyages_with_status("scheduled", guild_id=10), key=lambda v: v.starts_at)
+    await bot.db.update_voyage(fort.id, status="sailed")
+    out = await act(bot, guild, boxer, here, "voyage", {"action": "answer", "voyage": fort.id, "answer": "maybe"})
+    assert "Fort Night" in out and "sailed" in out and "by name" in out, out
+    out = await act(bot, guild, boxer, here, "voyage", {"action": "answer", "name": "community night voyage",
+                                                        "answer": "maybe"})
+    assert f"#{night.id}" in out and "Community Night" in out, out
+    assert 1 in (await bot.db.rsvps(night.id)).maybe
+    # the name wins over a stale number
+    await act(bot, guild, boxer, here, "voyage", {"action": "answer", "name": "community night", "voyage": fort.id,
+                                                  "answer": "aboard"})
+    assert 1 in (await bot.db.rsvps(night.id)).aboard
+    assert "No scheduled voyage matches" in await act(bot, guild, boxer, here, "voyage", {
+        "action": "answer", "name": "kraken hunt", "answer": "maybe"})
+    await act(bot, guild, boxer, here, "voyage", {"action": "plan", "title": "Community Night II", "game": "SoT",
+                                                  "date": (today + timedelta(days=40)).strftime("%m/%d/%Y"),
+                                                  "time": "2pm"})
+    out = await act(bot, guild, boxer, here, "voyage", {"action": "answer", "name": "community night", "answer": "cant"})
+    assert out.startswith("Several voyages match") and "Community Night II" in out
+    # organizer actions take the name too
+    out = await act(bot, guild, boxer, here, "voyage", {"action": "edit", "name": "community night ii", "seats": 3})
+    assert (next(v for v in await bot.db.voyages_with_status("scheduled", guild_id=10)
+                 if v.title == "Community Night II")).capacity == 3, out
