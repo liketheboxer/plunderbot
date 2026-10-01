@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1 (2026-10-01): Parley sees voyages further out
+
+- Parley's voyage look-up covered only the next 14 days, so asking to join a voyage a month away ("put me Aboard for Community Night") got "there aren't any voyages", and then a request for the voyage's number. It now lists the next 60 days by default, and when someone names a voyage it **searches every scheduled voyage by title or game, however far out**. With nothing in range it names the next one coming up.
+- The rules tell it to search before ever saying a voyage doesn't exist, and never to ask a member for a number it can look up.
+
 ## 1.6.0 (2026-10-01): Ask PlunderBot for anything
 
 Pairs with The Magical Samurai 1.20.1 (the Swabbie's guide). Nothing to set up.

@@ -299,11 +299,30 @@ class Parley(commands.Cog):
             return await act(self.bot, guild, author, channel, name, args, turn or Turn(spawn=self.spawn))
         now = datetime.now(timezone.utc)
         if name == "upcoming_voyages":
-            from ..crew_logic import iso
-            vs = [v for v in await db.voyages_starting_between(guild.id, iso(now), iso(now + timedelta(days=14)))
-                  if v.status == "scheduled" and self.public_channel(guild, v.channel_id)]
-            if not vs:
-                return "No voyages scheduled in the next 14 days. Anyone can plan one with /voyage create."
+            # 1.6.1: 60 days by default (was 14), and a search across every scheduled voyage, however far out
+            vs = sorted((v for v in await db.voyages_with_status("scheduled", guild_id=guild.id)
+                         if self.public_channel(guild, v.channel_id)), key=lambda v: v.starts_at)
+            search = " ".join(str(args.get("search") or "").lower().split())[:80]
+            days = args.get("days") if isinstance(args.get("days"), int) and 1 <= args["days"] <= 366 else 60
+            if search:
+                words = [w for w in re.split(r"[^\w]+", search) if w]
+
+                def text(v):
+                    g = games.get(v.game_key)
+                    return f"{v.title} {g.name if g else 'server event'} {g.short if g else ''}".lower()
+                found = [v for v in vs if all(w in text(v) for w in words)]
+                if not found:
+                    return (f"No scheduled voyage matches \"{search}\" at any date. Scheduled voyages: "
+                            + (", ".join(f"#{v.id} {v.title}" for v in vs[:20]) or "none") + ".")
+                vs = found
+            else:
+                end = (now + timedelta(days=days)).isoformat()
+                later = [v for v in vs if v.starts_at >= end]
+                vs = [v for v in vs if v.starts_at < end]
+                if not vs:
+                    nxt = (f" The next one is #{later[0].id} {later[0].title} on "
+                           f"<t:{int(datetime.fromisoformat(later[0].starts_at).timestamp())}:F>.") if later else ""
+                    return f"No voyages scheduled in the next {days} days.{nxt} Anyone can plan one with /voyage create."
             lines = []
             for v in vs[:15]:
                 r = await db.rsvps(v.id)
@@ -312,6 +331,8 @@ class Parley(commands.Cog):
                 link = f"https://discord.com/channels/{v.guild_id}/{v.channel_id}/{v.message_id}" if v.message_id else ""
                 stamp = int(datetime.fromisoformat(v.starts_at).timestamp())
                 lines.append(f"- #{v.id} {v.title} ({game}) at <t:{stamp}:F>, organized by <@{v.organizer_id}>, {seats} {link}")
+            if len(vs) > 15:
+                lines.append(f"...and {len(vs) - 15} more; search by name to find one.")
             return "\n".join(lines)
         if name == "open_crews":
             crews = [c for c in await db.active_crews(guild.id) if self.public_channel(guild, c.channel_id)]

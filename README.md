@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.6.0 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho), plus **music** in voice channels. The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.6.1 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho), plus **music** in voice channels. The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 

@@ -383,3 +383,36 @@ async def test_skipping_this_very_date_is_confirmed_and_staff_cards_stay_private
     assert "no voyage" in await act(bot, guild, twiddles, here, "voyage", {"action": "answer", "voyage": v.id,
                                                                            "answer": "aboard"})
     assert 2 not in (await bot.db.rsvps(v.id)).aboard
+
+
+async def test_finding_voyages_far_out_and_by_name(env, monkeypatch):
+    """1.6.1: the look-up covers 60 days, and a search finds a voyage however far out it is."""
+    bot, guild, here = await _setup(env, monkeypatch)
+    boxer = who(1)
+    parley = bot.get_cog("Parley")
+    s = await bot.db.get_settings(10)
+    today = datetime.now(timezone.utc).date()
+    for title, days in (("Fort Night", 3), ("Brimstone Community Night", 30), ("New Year's Eve Bash", 200)):
+        out = await act(bot, guild, boxer, here, "voyage", {"action": "plan", "title": title, "game": "SoT",
+                                                            "date": (today + timedelta(days=days)).strftime("%m/%d/%Y"),
+                                                            "time": "8pm"})
+        assert out.startswith("Planned"), out
+
+    async def look(**args):
+        return await parley.run_tool(guild, s, "upcoming_voyages", args, today.isoformat(), boxer, here)
+    plain = await look()
+    assert "Fort Night" in plain and "Community Night" in plain and "Bash" not in plain
+    assert "Fort Night" in await look(days=7) and "Community" not in await look(days=7)
+    found = await look(search="community night")
+    assert "Brimstone Community Night" in found and "Fort Night" not in found
+    assert "New Year's Eve Bash" in await look(search="bash")
+    by_game = await look(search="sea of thieves")
+    assert all(t in by_game for t in ("Fort Night", "Community Night", "Bash"))      # the game counts as a word
+    missing = await look(search="kraken hunt")
+    assert "No scheduled voyage matches" in missing and "#" in missing
+    v = next(x for x in await bot.db.voyages_with_status("scheduled", guild_id=10) if x.title == "New Year's Eve Bash")
+    for x in await bot.db.voyages_with_status("scheduled", guild_id=10):
+        if x.id != v.id:
+            await bot.db.update_voyage(x.id, status="cancelled")
+    nothing_soon = await look()
+    assert "No voyages scheduled in the next 60 days" in nothing_soon and f"#{v.id} New Year's Eve Bash" in nothing_soon
