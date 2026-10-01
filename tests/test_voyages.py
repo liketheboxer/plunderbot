@@ -197,7 +197,7 @@ async def test_create_rsvp_waitlist_and_promotion(env):
 
 async def test_reminders_start_and_end(env):
     bot, cog, guild, text = env
-    await make_voyage(cog, guild, repeat=SimpleNamespace(value="weekly", name="Every week"))
+    await make_voyage(cog, guild, repeat="weekly")
     (v,) = await bot.db.voyages_with_status("scheduled")
     await cog.on_button(interaction_for(guild, 2), "aboard", v.id)
     await cog.on_button(interaction_for(guild, 7), "maybe", v.id)
@@ -235,7 +235,7 @@ async def test_reminders_start_and_end(env):
 
 async def test_cancel_and_permissions(env):
     bot, cog, guild, text = env
-    await make_voyage(cog, guild, game=None, size=None, repeat=SimpleNamespace(value="weekly", name="Every week"))
+    await make_voyage(cog, guild, game=None, size=None, repeat="weekly")
     (v,) = await bot.db.voyages_with_status("scheduled")
     assert v.capacity is None and v.game_key is None  # a general event: no seat limit
     await cog.on_button(interaction_for(guild, 2), "aboard", v.id)
@@ -327,7 +327,7 @@ def test_big_crew_cards_fit():
 
 async def test_no_duplicate_repeats_and_cancel_after_start(env):
     bot, cog, guild, text = env
-    await make_voyage(cog, guild, repeat=SimpleNamespace(value="weekly", name="Every week"))
+    await make_voyage(cog, guild, repeat="weekly")
     (v,) = await bot.db.voyages_with_status("scheduled")
     await cog.tick(guild, v.id, datetime.fromisoformat(v.starts_at) + timedelta(seconds=5))
     started = await bot.db.get_voyage(v.id)

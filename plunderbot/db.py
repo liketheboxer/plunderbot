@@ -421,6 +421,11 @@ MIGRATIONS: list[str] = [
     ALTER TABLE guild_settings ADD COLUMN music_volume INTEGER NOT NULL DEFAULT 60;
     ALTER TABLE guild_settings ADD COLUMN music_stay INTEGER NOT NULL DEFAULT 0;
     """,
+    # 1.5.0: a repeating voyage can end on a date and skip dates (both carried along the series)
+    """
+    ALTER TABLE voyages ADD COLUMN repeat_until TEXT;
+    ALTER TABLE voyages ADD COLUMN skips TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 
@@ -569,6 +574,8 @@ class Voyage:
     created_at: str
     image: str | None = None
     ping_role: str = "posted"  # off | posted | reminders: when the game's ping role is tagged
+    repeat_until: str | None = None  # the last local date a repeating series runs to (YYYY-MM-DD)
+    skips: str = ""                  # local dates the series skips, comma separated
 
     @property
     def reminder_minutes(self) -> list[int]:
@@ -581,7 +588,7 @@ class Voyage:
 
 _VOYAGE_COLUMNS = {"channel_id", "message_id", "title", "description", "game_key", "size_label", "capacity",
                    "starts_at", "duration_min", "reminders", "reminders_sent", "repeat", "series_id", "status",
-                   "event_id", "crew_id", "image", "ping_role"}
+                   "event_id", "crew_id", "image", "ping_role", "repeat_until", "skips"}
 
 
 @dataclass
@@ -956,6 +963,19 @@ class Database:
             args.append(guild_id)
         rows = await (await self.conn.execute(sql + " ORDER BY starts_at, id", args)).fetchall()
         return [Voyage(**{k: r[k] for k in r.keys()}) for r in rows]
+
+    async def series_has_later(self, series_id: int, starts_at: str) -> bool:
+        """Whether a series already has a voyage after this start, in any state (1.5.0): the next one was
+        posted, even if it has since been cancelled, so the series isn't to be carried on again."""
+        row = await (await self.conn.execute(
+            "SELECT 1 FROM voyages WHERE series_id = ? AND starts_at > ? LIMIT 1", (series_id, starts_at))).fetchone()
+        return row is not None
+
+    async def retire_series(self, series_id: int, keep_id: int) -> None:
+        """A series that was re-planned from voyage keep_id: the ones still under sail stop carrying it on."""
+        await self.conn.execute("UPDATE voyages SET repeat = 'none' WHERE series_id = ? AND id != ? AND status = 'started'",
+                                (series_id, keep_id))
+        await self.conn.commit()
 
     async def voyage_by_crew(self, crew_id: int) -> "Voyage | None":
         row = await (await self.conn.execute("SELECT id FROM voyages WHERE crew_id = ?", (crew_id,))).fetchone()

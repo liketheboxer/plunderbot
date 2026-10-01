@@ -26,6 +26,19 @@ REMINDER_PRESETS = [
     ("No reminders before the start", "none"),
 ]
 REPEATS = {"none": "Doesn't repeat", "weekly": "Every week", "biweekly": "Every 2 weeks", "monthly": "Every month"}
+# 1.5.0: more patterns. A repeat is stored as a short code:
+#   none | weekly | biweekly | weeks:N (every N weeks, 1-12) | monthly (the same date)
+#   | nth:K:D (the Kth weekday D of each month; K 1-4, or -1 for the last; D 0=Monday .. 6=Sunday)
+# The two "nth" choices below are filled in from the voyage's own date when it's saved.
+REPEAT_CHOICES = [
+    ("Doesn't repeat", "none"), ("Every week", "weeks:1"), ("Every 2 weeks", "weeks:2"),
+    ("Every 3 weeks", "weeks:3"), ("Every 4 weeks", "weeks:4"), ("Every month, same date", "monthly"),
+    ("Every month, same weekday (like the 2nd Saturday)", "nth"),
+    ("Every month, last weekday (like the last Friday)", "nth:last"),
+]
+MAX_REPEAT_WEEKS = 12
+MAX_SKIPS = 20
+ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th", -1: "last"}
 MAX_REMINDERS = 5
 
 
@@ -195,20 +208,156 @@ def overdue_reminders(starts_at: datetime, created_at: datetime, minutes: list[i
 
 
 # ------------------------------------------------------------ repeats
-def next_occurrence(starts_at: datetime, repeat: str, tz: ZoneInfo, anchor_day: int | None = None) -> datetime | None:
+def _weeks(code: str) -> int | None:
+    if code == "weekly":
+        return 1
+    if code == "biweekly":
+        return 2
+    m = re.fullmatch(r"weeks:(\d{1,2})", code or "")
+    return int(m.group(1)) if m and 1 <= int(m.group(1)) <= MAX_REPEAT_WEEKS else None
+
+
+def _nth(code: str) -> tuple[int, int] | None:
+    m = re.fullmatch(r"nth:(-1|[1-4]):([0-6])", code or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def valid_repeat(code: str) -> bool:
+    return code in ("none", "monthly") or _weeks(code) is not None or _nth(code) is not None
+
+
+def nth_of(day: date, last: bool = False) -> str:
+    """The "nth weekday" code for a date: 2026-10-10 is the 2nd Saturday, nth:2:5.
+    The 5th of a weekday (the 29th to 31st) only happens some months, so it's taken as the last."""
+    k = (day.day - 1) // 7 + 1
+    return f"nth:{-1 if last or k == 5 else k}:{day.weekday()}"
+
+
+def resolve_repeat(choice: str, day: date) -> str:
+    """Turn a picked choice into the stored code, using the voyage's date for the monthly-weekday ones."""
+    choice = (choice or "none").strip().lower()
+    if choice == "nth":
+        return nth_of(day)
+    if choice == "nth:last":
+        return nth_of(day, last=True)
+    if choice in ("weekly", "biweekly"):
+        return choice
+    if valid_repeat(choice):
+        return choice
+    m = re.fullmatch(r"every\s+(\d{1,2})\s+weeks?", choice)
+    if m and 1 <= int(m.group(1)) <= MAX_REPEAT_WEEKS:
+        return f"weeks:{int(m.group(1))}"
+    raise ParseError(f"I don't know that repeat. Pick one from the list, or say \"every 3 weeks\" "
+                     f"(up to {MAX_REPEAT_WEEKS}).")
+
+
+def describe_repeat(code: str) -> str:
+    if code in REPEATS:
+        return REPEATS[code]
+    n = _weeks(code)
+    if n is not None:
+        return "Every week" if n == 1 else f"Every {n} weeks"
+    nth = _nth(code)
+    if nth is not None:
+        return f"Every month on the {ORDINALS[nth[0]]} {WEEKDAYS[nth[1]].capitalize()}"
+    return code
+
+
+def repeat_choices(day: date | None) -> list[tuple[str, str]]:
+    """The choices with the monthly-weekday ones spelled out for a known date."""
+    if day is None:
+        return REPEAT_CHOICES
+    out = []
+    for label, code in REPEAT_CHOICES:
+        if code == "monthly":
+            label = f"Every month on the {day.day}{_suffix(day.day)}"
+        elif code in ("nth", "nth:last"):
+            code = resolve_repeat(code, day)
+            label = describe_repeat(code)
+            if any(c == code for _, c in out):
+                continue
+        out.append((label, code))
+    return out
+
+
+def _suffix(n: int) -> str:
+    return "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
+def _nth_day(y: int, m: int, k: int, wd: int) -> date:
+    if k == -1:
+        last = date(y, m, calendar.monthrange(y, m)[1])
+        return last - timedelta(days=(last.weekday() - wd) % 7)
+    first = date(y, m, 1)
+    return first + timedelta(days=(wd - first.weekday()) % 7 + 7 * (k - 1))
+
+
+def next_occurrence(starts_at: datetime, repeat: str, tz: ZoneInfo, anchor_day: int | None = None,
+                    at: time | None = None) -> datetime | None:
     """The next start in a series, keeping the same local wall-clock time across daylight saving.
-    Monthly repeats aim for anchor_day (the series' original day) so Jan 31 -> Feb 28 -> Mar 31."""
-    if repeat not in ("weekly", "biweekly", "monthly"):
-        return None
+    Monthly repeats aim for anchor_day (the series' original day) so Jan 31 -> Feb 28 -> Mar 31.
+    `at` is the series' own time of day, so a start pushed on by a daylight-saving gap (2:30 becoming
+    3:30) doesn't drag the rest of the series with it."""
     local = starts_at.astimezone(tz)
-    if repeat == "weekly":
-        nxt = local.date() + timedelta(days=7)
-    elif repeat == "biweekly":
-        nxt = local.date() + timedelta(days=14)
-    else:
+    weeks, nth = _weeks(repeat), _nth(repeat)
+    if weeks is not None:
+        nxt = local.date() + timedelta(days=7 * weeks)
+    elif repeat == "monthly" or nth is not None:
         y, m = (local.year + 1, 1) if local.month == 12 else (local.year, local.month + 1)
-        nxt = date(y, m, min(anchor_day or local.day, calendar.monthrange(y, m)[1]))
-    return to_utc(nxt, local.timetz().replace(tzinfo=None), tz)
+        if nth is not None:
+            nxt = _nth_day(y, m, *nth)
+        else:
+            nxt = date(y, m, min(anchor_day or local.day, calendar.monthrange(y, m)[1]))
+    else:
+        return None
+    return to_utc(nxt, at or local.timetz().replace(tzinfo=None), tz)
+
+
+def parse_skips(text: str | None) -> list[date]:
+    out = []
+    for part in (text or "").split(","):
+        try:
+            out.append(date.fromisoformat(part.strip()))
+        except ValueError:
+            continue
+    return sorted(set(out))
+
+
+def format_skips(days: list[date], after: date | None = None) -> str:
+    """Stored form, dropping dates already gone by and keeping the list short."""
+    kept = sorted({d for d in days if after is None or d >= after})
+    return ",".join(d.isoformat() for d in kept[:MAX_SKIPS])
+
+
+def following(starts_at: datetime, repeat: str, tz: ZoneInfo, anchor_day: int | None = None,
+              until: date | None = None, skips: list[date] | None = None, after: datetime | None = None,
+              at: time | None = None) -> datetime | None:
+    """The next start of a series that isn't skipped, isn't past its end date and is after `after`."""
+    skips = set(skips or [])
+    nxt = next_occurrence(starts_at, repeat, tz, anchor_day, at)
+    for _ in range(600):  # every week for over ten years; a series can't run forever looking
+        if nxt is None:
+            return None
+        day = nxt.astimezone(tz).date()
+        if until is not None and day > until:
+            return None
+        if day not in skips and (after is None or nxt > after):
+            return nxt
+        nxt = next_occurrence(nxt, repeat, tz, anchor_day, at)
+    return None
+
+
+def upcoming_dates(starts_at: datetime, repeat: str, tz: ZoneInfo, anchor_day: int | None = None,
+                   until: date | None = None, count: int = 8, at: time | None = None) -> list[datetime]:
+    """The series' next starts after this one, skipped dates included (so they can be shown and un-skipped)."""
+    out: list[datetime] = []
+    nxt = next_occurrence(starts_at, repeat, tz, anchor_day, at)
+    while nxt is not None and len(out) < count:
+        if until is not None and nxt.astimezone(tz).date() > until:
+            break
+        out.append(nxt)
+        nxt = next_occurrence(nxt, repeat, tz, anchor_day, at)
+    return out
 
 
 # ------------------------------------------------------------ RSVPs
@@ -263,7 +412,9 @@ def render_voyage(v, rsvps: Rsvps, profile: GameProfile | None, emoji: str,
         embed.description = v.description[:2000]
     when = f"<t:{stamp}:F> (<t:{stamp}:R>)"
     if v.repeat != "none":
-        when += f"\n{REPEATS[v.repeat]}"
+        when += f"\n{describe_repeat(v.repeat)}"
+        if getattr(v, "repeat_until", None):
+            when += f" until {date.fromisoformat(v.repeat_until).strftime('%b %-d, %Y')}"
     embed.add_field(name="When", value=when, inline=False)
     if profile is not None:
         game = profile.name if profile.open_ended else f"{profile.name}: {v.size_label}"

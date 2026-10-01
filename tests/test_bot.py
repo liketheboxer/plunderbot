@@ -41,7 +41,7 @@ async def test_command_tree(bot):
     assert {c.name for c in top["ship"].commands} == {"register", "edit", "retire", "show", "fleet", "log"}
     assert {c.name for c in top["pirate"].commands} == {"profile", "set"}
     assert top["ship"].guild_only and top["pirate"].guild_only
-    assert {c.name for c in top["voyage"].commands} == {"create", "edit", "cancel", "list"}
+    assert {c.name for c in top["voyage"].commands} == {"create", "edit", "cancel", "list", "series"}
     admin = top["admin"]
     assert isinstance(admin, app_commands.Group)
     assert admin.guild_only and admin.default_permissions.manage_guild

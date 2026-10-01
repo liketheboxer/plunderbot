@@ -6,9 +6,10 @@ pinged, and latecomers can still join from the crew card. The same code runs any
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date as Date, datetime, timedelta
 
 import discord
 from discord import app_commands
@@ -19,14 +20,14 @@ from ..birthday_logic import zone
 from ..crew_logic import PING_COOLDOWN, iso, now_utc
 from ..db import Voyage
 from ..mentions import send_pinging
-from ..voyage_logic import (REMINDER_PRESETS, REPEATS, ParseError, due_reminder, format_reminders,
-                            is_weekday_name, next_occurrence, overdue_reminders, parse_date, parse_reminders,
-                            parse_time, placement, render_voyage, split_zone, to_utc, zone_label)
+from ..voyage_logic import (REMINDER_PRESETS, ParseError, describe_repeat, due_reminder, following,
+                            format_reminders, format_skips, is_weekday_name, overdue_reminders, parse_date,
+                            nth_of, parse_reminders, parse_skips, parse_time, placement, render_voyage, repeat_choices,
+                            resolve_repeat, split_zone, to_utc, upcoming_dates, zone_label)
 
 log = logging.getLogger("plunderbot.voyages")
 
 GAME_CHOICES = [app_commands.Choice(name=g.name, value=g.key) for g in games.GAMES]
-REPEAT_CHOICES = [app_commands.Choice(name=label, value=key) for key, label in REPEATS.items()]
 PINGS = {"posted": "Tag the game's role when it's posted",
          "reminders": "Tag the game's role when posted, at each reminder and when it sails",
          "off": "Don't tag the game's role"}
@@ -73,6 +74,17 @@ def voyage_view(v: Voyage) -> discord.ui.View:
 def _can_manage(member, v: Voyage) -> bool:
     p = member.guild_permissions
     return member.id == v.organizer_id or p.manage_events or p.manage_guild or p.administrator
+
+
+NO_END = ("never", "none", "no end", "-")
+
+
+def _day(text: str, today: Date) -> Date:
+    """A date picked from the list (2026-10-10) or typed (10/10, saturday)."""
+    try:
+        return Date.fromisoformat(text.strip())
+    except ValueError:
+        return parse_date(text, today)
 
 
 def _link(v: Voyage) -> str:
@@ -235,19 +247,20 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         seats="Override how many can be Aboard (leave empty for the crew size, or no limit)",
         description="Details for the crew",
         reminders="When to remind people before the start, e.g. 1d, 1h (default) or none",
-        repeat="Repeat this voyage",
+        repeat="Repeat this voyage: every week, every 3 weeks, the 2nd Saturday of each month...",
+        repeat_ends="For a repeating voyage: the last date it runs (leave empty to keep going)",
         duration="Expected length in minutes (for the Discord Event)",
         image="A picture for the voyage card (it goes on the crew card too when it sails)",
         notify="When to tag the game's ping role (default: when it's posted)")
-    @app_commands.choices(game=GAME_CHOICES, repeat=REPEAT_CHOICES, notify=PING_CHOICES)
+    @app_commands.choices(game=GAME_CHOICES, notify=PING_CHOICES)
     async def create(self, interaction: discord.Interaction, title: app_commands.Range[str, 1, 80],
                      date: str, time: str, game: app_commands.Choice[str] | None = None,
                      size: str | None = None, seats: app_commands.Range[int, 1, 99] | None = None,
                      description: app_commands.Range[str, 1, 1000] | None = None,
-                     reminders: str | None = None, repeat: app_commands.Choice[str] | None = None,
+                     reminders: str | None = None, repeat: str | None = None,
                      duration: app_commands.Range[int, 15, 720] = 120,
                      image: discord.Attachment | None = None,
-                     notify: app_commands.Choice[str] | None = None) -> None:
+                     notify: app_commands.Choice[str] | None = None, repeat_ends: str | None = None) -> None:
         guild = interaction.guild
         tz, whose = await self.reading_zone(interaction.user.id, guild.id)
         profile = games.get(game.value) if game else None
@@ -261,6 +274,8 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             if starts <= now and is_weekday_name(date):  # "friday" on a Friday evening means next Friday
                 starts = to_utc(day + timedelta(days=7), parse_time(time_text), tz)
             minutes = parse_reminders(reminders)
+            repeat_code = resolve_repeat(repeat or "none", starts.astimezone(tz).date())
+            until = self.read_until(repeat_ends, repeat_code, starts.astimezone(tz).date(), tz)
         except ParseError as e:
             await interaction.response.send_message(voice.say("voyage_bad_input", error=str(e)), ephemeral=True)
             return
@@ -298,8 +313,8 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 return
         v = await self.launch(guild, channel, interaction.user.id, title=title.strip(), description=description,
                               profile=profile, size_label=size_label, capacity=capacity, starts=starts,
-                              duration=duration, minutes=minutes, repeat=repeat.value if repeat else "none",
-                              ping_role=notify.value if notify else "posted", image=image_name)
+                              duration=duration, minutes=minutes, repeat=repeat_code,
+                              ping_role=notify.value if notify else "posted", image=image_name, repeat_until=until)
         if v is None:
             await interaction.followup.send(voice.say("crew_cant_post"), ephemeral=True)
             return
@@ -311,7 +326,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
     async def launch(self, guild: discord.Guild, channel, organizer_id: int, *, title: str,
                      description: str | None, profile, size_label: str | None, capacity: int | None,
                      starts: datetime, duration: int, minutes: list[int], repeat: str, ping_role: str,
-                     image: str | None = None) -> Voyage | None:
+                     image: str | None = None, repeat_until: str | None = None) -> Voyage | None:
         """Save a new voyage with its organizer Aboard and post its card. None if the card couldn't go up.
         Used by /voyage create and by the Daisho screens (1.2.0)."""
         now = now_utc()
@@ -320,7 +335,8 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             description=description, game_key=profile.key if profile else None, size_label=size_label,
             capacity=capacity, starts_at=iso(starts), duration_min=duration,
             reminders=",".join(str(m) for m in minutes), repeat=repeat,
-            created_at=iso(now), image=image, ping_role=ping_role)
+            created_at=iso(now), image=image, ping_role=ping_role,
+            repeat_until=repeat_until if repeat != "none" else None)
         v = await self.bot.db.update_voyage(v.id, series_id=v.id)
         await self.bot.db.set_rsvp(v.id, organizer_id, "aboard", iso(now))
         try:
@@ -345,6 +361,146 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         if whose == "typed":
             return f"I read your time as {label}. Everyone sees it in their own time."
         return f"I read your time as {label}, your saved time zone. Everyone sees it in their own time."
+
+    # ------------------------------------------------------------ repeating series (1.5.0)
+    @staticmethod
+    def read_until(text: str | None, repeat: str, first_day: Date, tz) -> str | None:
+        """A typed end date for a series ("12/19", "2027-01-30"), or None for no end."""
+        if not text or repeat == "none" or text.strip().lower() in NO_END:
+            return None
+        day = parse_date(text, datetime.now(tz).date())
+        if day < first_day:
+            raise ParseError("The repeat can't end before the voyage itself.")
+        return day.isoformat()
+
+    async def series_dates(self, v: Voyage, count: int = 8) -> list[tuple[Date, bool]]:
+        """The series' dates after this voyage, each with whether it's skipped. Empty when it doesn't repeat."""
+        if v.repeat == "none":
+            return []
+        tz = await self.tz(v.guild_id)
+        until = Date.fromisoformat(v.repeat_until) if v.repeat_until else None
+        skips = set(parse_skips(v.skips))
+        day, at = await self.anchor(v, tz)
+        return [(d.astimezone(tz).date(), d.astimezone(tz).date() in skips)
+                for d in upcoming_dates(datetime.fromisoformat(v.starts_at), v.repeat, tz, day, until, count, at)]
+
+    async def anchor(self, v: Voyage, tz):
+        """The series' own day of the month and time of day, from its first voyage."""
+        first = await self.bot.db.get_voyage(v.series_id or v.id) or v
+        local = datetime.fromisoformat(first.starts_at).astimezone(tz)
+        return local.day, local.time().replace(tzinfo=None)
+
+    async def plan_series(self, v: Voyage, tz, *, repeat: str | None = None, until: str | None = None,
+                          clear_until: bool = False, skip: list[Date] = (), unskip: list[Date] = (),
+                          moved: bool = False) -> tuple[dict, bool]:
+        """Work out the changes to a voyage's repeat, end date and skipped dates. Returns the changes and
+        whether this voyage itself is to be skipped (cancelled, with the series carrying on).
+        `v` carries the voyage's new start when it's being moved (`moved`).
+        Raises ParseError with something to show the organizer."""
+        changes: dict = {}
+        local_day = datetime.fromisoformat(v.starts_at).astimezone(tz).date()
+        code = v.repeat
+        if repeat is not None:
+            code = resolve_repeat(repeat, local_day)
+            legacy = {"weekly": "weeks:1", "biweekly": "weeks:2"}
+            if legacy.get(code, code) == legacy.get(v.repeat, v.repeat):
+                code = v.repeat                       # "weeks:1" is what "weekly" always was
+        elif moved and code.startswith("nth:"):
+            # "the 2nd Saturday" moved to a Tuesday becomes "the 2nd Tuesday" (or the last, if it was)
+            code = nth_of(local_day, last=code.startswith("nth:-1:"))
+        if code != v.repeat or (moved and code != "none"):
+            # a new pattern, or a new day or time, starts the series again from this voyage, so "the
+            # same date each month" and the time of day count from here
+            changes["series_id"] = v.id
+            if code != v.repeat:
+                changes["repeat"] = code
+        if code == "none":
+            if v.repeat_until or v.skips:
+                changes.update(repeat_until=None, skips="")
+            if skip or unskip or until:
+                raise ParseError("This voyage doesn't repeat, so there's no series to change. "
+                                 "Pick how it repeats first.")
+            return changes, False
+        if clear_until:
+            changes["repeat_until"] = None
+        elif until is not None:
+            changes["repeat_until"] = Date.fromisoformat(until).isoformat()
+        last = changes.get("repeat_until", v.repeat_until)
+        if last and Date.fromisoformat(last) < local_day:
+            raise ParseError(f"That's after the series' last date ({Date.fromisoformat(last).strftime('%b %-d, %Y')}). "
+                             "Change when it ends too.")
+        skips = set(parse_skips(v.skips))
+        skip_this = False
+        if skip or unskip:
+            probe = dataclasses.replace(v, **{**changes, "repeat": code})
+            dates = {d for d, _ in await self.series_dates(probe, count=60)}
+            for d in skip:
+                if d == local_day:
+                    skip_this = True
+                elif d in dates:
+                    skips.add(d)
+                else:
+                    raise ParseError(f"{d.strftime('%a %b %-d')} isn't one of this series' dates.")
+            skips -= set(unskip)
+            if len(skips) > 20:
+                raise ParseError("That's a lot of skipped dates. End the series earlier instead.")
+            new = format_skips(sorted(skips), after=local_day)
+            if new != v.skips:
+                changes["skips"] = new
+        return changes, skip_this
+
+    async def apply_series(self, guild, v: Voyage, changes: dict, skip_this: bool) -> Voyage | None:
+        """Save the series changes, then cancel this one voyage if it's being skipped (the next is posted)."""
+        old_series = v.series_id or v.id
+        if changes:
+            v = await self.apply_edit(guild, v.id, changes)
+            if v is None:
+                return None
+            if changes.get("series_id") == v.id and old_series != v.id:
+                await self.bot.db.retire_series(old_series, v.id)
+        if skip_this:
+            if not await self.apply_cancel(guild, v.id):
+                return None
+        return await self.bot.db.get_voyage(v.id)
+
+    def series_text(self, v: Voyage, dates: list[tuple[Date, bool]]) -> str:
+        if v.repeat == "none":
+            return "This voyage doesn't repeat."
+        head = describe_repeat(v.repeat)
+        if v.repeat_until:
+            head += f", until {Date.fromisoformat(v.repeat_until).strftime('%a %b %-d, %Y')}"
+        lines = [f"**{v.title}**: {head}.", f"- <t:{int(datetime.fromisoformat(v.starts_at).timestamp())}:D> (this one)"]
+        for d, skipped in dates:
+            lines.append(f"- ~~{d.strftime('%a %b %-d, %Y')}~~ skipped" if skipped else f"- {d.strftime('%a %b %-d, %Y')}")
+        if not dates:
+            lines.append("No more dates after this one.")
+        lines.append("Change it with `/voyage edit`: repeat, repeat_ends, skip or unskip.")
+        return "\n".join(lines)
+
+    @create.autocomplete("repeat")
+    async def repeat_ac(self, interaction: discord.Interaction, current: str):
+        day = None
+        typed = getattr(interaction.namespace, "date", None)
+        voyage = getattr(interaction.namespace, "voyage", None)
+        try:
+            tz, _ = await self.reading_zone(interaction.user.id, interaction.guild_id)
+            if typed:
+                day = parse_date(typed, datetime.now(tz).date())
+            elif voyage and str(voyage).isdigit():
+                v = await self.bot.db.get_voyage(int(voyage))
+                if v is not None and v.guild_id == interaction.guild_id:
+                    day = datetime.fromisoformat(v.starts_at).astimezone(tz).date()
+        except ParseError:
+            day = None
+        options = [app_commands.Choice(name=label, value=code) for label, code in repeat_choices(day)
+                   if current.lower() in label.lower()]
+        if current and not options:
+            try:
+                code = resolve_repeat(current, day or Date.today())
+                options.append(app_commands.Choice(name=describe_repeat(code), value=code))
+            except ParseError:
+                pass
+        return options[:25]
 
     @create.autocomplete("size")
     async def size_ac(self, interaction: discord.Interaction, current: str):
@@ -390,14 +546,19 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
     @app_commands.describe(voyage="Which voyage", title="New title", date="New date", time="New time",
                            description="New details", reminders="New reminders, e.g. 1d, 1h or none",
                            seats="New number of seats Aboard", image="A new picture for the card",
-                           remove_image="Take the picture off the card", notify="When to tag the game's ping role")
+                           remove_image="Take the picture off the card", notify="When to tag the game's ping role",
+                           repeat="How it repeats from here on (or Doesn't repeat to stop)",
+                           repeat_ends="The last date the series runs, or never",
+                           skip="Skip one date of the series (this voyage's own date cancels just this one)",
+                           unskip="Put a skipped date back")
     @app_commands.choices(notify=PING_CHOICES)
     async def edit(self, interaction: discord.Interaction, voyage: str,
                    title: app_commands.Range[str, 1, 80] | None = None, date: str | None = None,
                    time: str | None = None, description: app_commands.Range[str, 1, 1000] | None = None,
                    reminders: str | None = None, seats: app_commands.Range[int, 1, 99] | None = None,
                    image: discord.Attachment | None = None, remove_image: bool = False,
-                   notify: app_commands.Choice[str] | None = None) -> None:
+                   notify: app_commands.Choice[str] | None = None, repeat: str | None = None,
+                   repeat_ends: str | None = None, skip: str | None = None, unskip: str | None = None) -> None:
         v = await self._fetch_manageable(interaction, voyage)
         if v is None:
             return
@@ -421,6 +582,18 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 changes.update(starts_at=iso(starts), reminders_sent="")
             if reminders is not None:
                 changes.update(reminders=",".join(str(m) for m in parse_reminders(reminders)), reminders_sent="")
+            skip_this = False
+            if repeat or repeat_ends or skip or unskip or (starts is not None and v.repeat != "none"):
+                stz = await self.tz(v.guild_id)
+                today = datetime.now(stz).date()
+                ends = (repeat_ends or "").strip().lower()
+                series, skip_this = await self.plan_series(
+                    dataclasses.replace(v, starts_at=changes.get("starts_at", v.starts_at)), stz, repeat=repeat,
+                    until=_day(repeat_ends, today).isoformat() if ends and ends not in NO_END else None,
+                    clear_until=ends in NO_END,
+                    skip=[_day(skip, today)] if skip else [], unskip=[_day(unskip, today)] if unskip else [],
+                    moved=starts is not None)
+                changes.update(series)
         except ParseError as e:
             await interaction.response.send_message(voice.say("voyage_bad_input", error=str(e)), ephemeral=True)
             return
@@ -434,7 +607,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
             changes["ping_role"] = notify.value
         if remove_image and image is None:
             changes["image"] = None
-        if not changes and image is None:
+        if not changes and image is None and not skip_this:
             await interaction.response.send_message(voice.say("voyage_nothing_changed"), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -445,15 +618,51 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                 log.warning("Voyage picture refused: %r", e)
                 await interaction.followup.send(voice.say("image_bad"), ephemeral=True)
                 return
-        v = await self.apply_edit(interaction.guild, v.id, changes)
+        v = await self.apply_series(interaction.guild, v, changes, skip_this)
         if v is None:  # it started meanwhile
             await interaction.followup.send(voice.say("voyage_over"), ephemeral=True)
             return
-        stamp = int(datetime.fromisoformat(v.starts_at).timestamp())
-        text = voice.say("voyage_edited", link=_link(v), when=f"<t:{stamp}:F>")
+        if skip_this:
+            text = voice.say("voyage_cancel_done")
+        else:
+            stamp = int(datetime.fromisoformat(v.starts_at).timestamp())
+            text = voice.say("voyage_edited", link=_link(v), when=f"<t:{stamp}:F>")
         if starts is not None:
             text += "\n" + self.zone_note(tz, whose, starts)
+        if {"repeat", "repeat_until", "skips"} & set(changes) or skip_this:
+            text += "\n" + self.series_text(v, await self.series_dates(v, count=5))
         await interaction.followup.send(text, ephemeral=True)
+
+    @app_commands.command(name="series", description="See the coming dates of a repeating voyage")
+    @app_commands.describe(voyage="Which voyage")
+    async def series(self, interaction: discord.Interaction, voyage: str) -> None:
+        v = await self.bot.db.get_voyage(int(voyage)) if voyage.isdigit() else None
+        if v is None or v.guild_id != interaction.guild_id or v.status != "scheduled":
+            await interaction.response.send_message(voice.say("voyage_none"), ephemeral=True)
+            return
+        await interaction.response.send_message(self.series_text(v, await self.series_dates(v)), ephemeral=True)
+
+    async def _series_ac(self, interaction: discord.Interaction, current: str, skipped: bool):
+        voyage = getattr(interaction.namespace, "voyage", None)
+        v = await self.bot.db.get_voyage(int(voyage)) if voyage and str(voyage).isdigit() else None
+        if v is None or v.guild_id != interaction.guild_id or not _can_manage(interaction.user, v):
+            return []
+        out = []
+        if not skipped:
+            tz = await self.tz(v.guild_id)
+            own = datetime.fromisoformat(v.starts_at).astimezone(tz).date()
+            out.append(app_commands.Choice(name=f"{own.strftime('%a %b %-d, %Y')} (this one: cancels just it)",
+                                           value=own.isoformat()))
+        for d, is_skipped in await self.series_dates(v, count=24):
+            if is_skipped == skipped:
+                out.append(app_commands.Choice(name=d.strftime("%a %b %-d, %Y"), value=d.isoformat()))
+        return [o for o in out if current.lower() in o.name.lower()][:25]
+
+    async def skip_ac(self, interaction: discord.Interaction, current: str):
+        return await self._series_ac(interaction, current, skipped=False)
+
+    async def unskip_ac(self, interaction: discord.Interaction, current: str):
+        return await self._series_ac(interaction, current, skipped=True)
 
     async def _reset_reminder_baseline(self, voyage_id: int) -> None:
         # created_at is the "don't fire reminders due before this" line; moving it to now stops an edit
@@ -513,6 +722,18 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         return True
 
     edit.autocomplete("voyage")(_manageable)
+    edit.autocomplete("repeat")(repeat_ac)
+    edit.autocomplete("skip")(skip_ac)
+    edit.autocomplete("unskip")(unskip_ac)
+
+    async def _repeating(self, interaction: discord.Interaction, current: str):
+        out = []
+        for v in await self.bot.db.voyages_with_status("scheduled", guild_id=interaction.guild_id):
+            if v.repeat != "none" and current.lower() in v.title.lower():
+                out.append(app_commands.Choice(name=f"{v.title[:60]} ({describe_repeat(v.repeat)[:30]})", value=str(v.id)))
+        return out[:25]
+
+    series.autocomplete("voyage")(_repeating)
     cancel.autocomplete("voyage")(_manageable)
 
     @app_commands.command(name="list", description="Upcoming voyages")
@@ -751,19 +972,24 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
                        if (x.series_id or x.id) == series]
             if waiting:
                 return None
+            if await self.bot.db.series_has_later(series, v.starts_at):
+                return None          # its next one was posted already (and maybe cancelled or re-planned)
             tz = await self.tz(guild.id)
-            first = await self.bot.db.get_voyage(series)
-            anchor = datetime.fromisoformat(first.starts_at).astimezone(tz).day if first else None
-            nxt = next_occurrence(datetime.fromisoformat(v.starts_at), v.repeat, tz, anchor)
+            anchor, at = await self.anchor(v, tz)
+            # the next date that isn't skipped, isn't past the series' end, and isn't already gone by
+            # (dates missed while PlunderBot was offline)
+            until = Date.fromisoformat(v.repeat_until) if v.repeat_until else None
+            nxt = following(datetime.fromisoformat(v.starts_at), v.repeat, tz, anchor, until,
+                            parse_skips(v.skips), after=now_utc(), at=at)
             if nxt is None:
                 return None
-            while nxt <= now_utc():  # skip occurrences missed while offline
-                nxt = next_occurrence(nxt, v.repeat, tz, anchor)
             new = await self.bot.db.create_voyage(
                 guild_id=v.guild_id, channel_id=v.channel_id, organizer_id=v.organizer_id, title=v.title,
                 description=v.description, game_key=v.game_key, size_label=v.size_label, capacity=v.capacity,
                 starts_at=iso(nxt), duration_min=v.duration_min, reminders=v.reminders, repeat=v.repeat,
-                series_id=series, created_at=iso(now_utc()), image=v.image, ping_role=v.ping_role)
+                series_id=series, created_at=iso(now_utc()), image=v.image, ping_role=v.ping_role,
+                repeat_until=v.repeat_until,
+                skips=format_skips(parse_skips(v.skips), after=nxt.astimezone(tz).date()))
             await self.bot.db.set_rsvp(new.id, v.organizer_id, "aboard", iso(now_utc()))
         try:
             return await self.post(guild, new, announce_role=False)

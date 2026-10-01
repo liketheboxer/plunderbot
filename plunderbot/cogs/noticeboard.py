@@ -38,14 +38,14 @@ STARTER_GUIDE = [
      "captain presses **Set Sail**) I open a voice channel for you, and tidy it away when everyone's gone.\n\n"
      "Just want company? Start a **1 Player Hangout** and play your own games together."),
     ("Plan a voyage",
-     "`/voyage create` puts a voyage on the charts in #brimstone-events with **Aboard**, **Maybe** and "
+     "`/voyage create` puts a voyage on the charts in {events} with **Aboard**, **Maybe** and "
      "**Can't make it** buttons, reminders before it starts, and a Discord Event. When it's time, it turns into "
      "a crew with its own voice channel. Anyone can plan one!"),
     ("Times in your own time zone",
      "Every time I show is in your own local time. When you type a time, I read it in your time zone: pick a "
-     "region role in #new-pirate-orientation, or set it exactly with `/timezone set`."),
+     "region role in {profile}, or set it exactly with `/timezone set`."),
     ("Pick your roles",
-     "The role menus in #new-pirate-orientation each have one button: press it, tick the roles you want and "
+     "The role menus in {profile} each have one button: press it, tick the roles you want and "
      "save. Follow the games you play with `/follow` so you hear when a crew is forming. You can change them "
      "whenever you like."),
     ("Your ship and the Ship's Ledger",
@@ -61,6 +61,15 @@ STARTER_GUIDE = [
     ("Need a hand?",
      "Ask a Harbormaster, or @mention me and ask. Fair winds!"),
 ]
+
+
+def starter_text(body: str, settings) -> str:
+    """A starter section with the server's own channels linked (1.5.0): a channel link keeps working when
+    the channel is renamed, as #new-pirate-orientation became #pirate-profile."""
+    def link(channel_id, fallback):
+        return f"<#{channel_id}>" if channel_id else fallback
+    return (body.replace("{profile}", link(settings.orientation_channel_id, "#pirate-profile"))
+                .replace("{events}", link(settings.voyage_channel_id, "#brimstone-events")))
 
 
 class SectionModal(discord.ui.Modal):
@@ -432,8 +441,9 @@ class Noticeboard(commands.GroupCog, group_name="noticeboard",
                                                     ephemeral=True)
             return
         p = await self.bot.db.create_page(interaction.guild_id, GUIDE_KEY, "Pirate's Guide")
+        s = await self.bot.db.get_settings(interaction.guild_id)
         for heading, body in STARTER_GUIDE:
-            await self.bot.db.add_section(p.id, heading, body)
+            await self.bot.db.add_section(p.id, heading, starter_text(body, s))
         await interaction.response.send_message(
             f"Drafted the **Pirate's Guide** with {len(STARTER_GUIDE)} sections (key `{GUIDE_KEY}`). Read it with "
             "/noticeboard preview, change anything with /noticeboard section edit, then post it.", ephemeral=True)

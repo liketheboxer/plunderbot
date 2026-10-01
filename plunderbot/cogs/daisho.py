@@ -16,12 +16,14 @@ token). Without them it does nothing, and if Daisho is down PlunderBot carries o
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
+import re
 import logging
 import time
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import aiohttp
 import discord
@@ -35,7 +37,8 @@ from ..crew_logic import clean_title, iso, now_utc, voice_channel_name
 from ..discord_util import self_serve_problem
 from ..ledger_logic import KINDS
 from ..menu_logic import MAX_OPTIONS, button_text, is_emoji, slug
-from ..voyage_logic import REPEATS, ParseError, format_reminders, parse_reminders
+from ..voyage_logic import (ParseError, describe_repeat, format_reminders, parse_reminders, repeat_choices,
+                            resolve_repeat)
 
 log = logging.getLogger("plunderbot.daisho")
 
@@ -53,6 +56,9 @@ class ApplyError(Exception):
 
 
 # ------------------------------------------------------------ talking to Daisho
+PICTURE_NAME = re.compile(r"[0-9a-f]{32}\.(png|jpg|gif|webp)")
+
+
 class SamuraiClient:
     def __init__(self, base: str, token: str):
         self.base, self.token = base.rstrip("/") + "/api/m/plunderbot/v1", token
@@ -81,6 +87,25 @@ class SamuraiClient:
 
     async def result(self, change_id: int, status: str, message: str) -> None:
         await self._call("POST", f"/changes/{change_id}", {"status": status, "message": message[:1900]})
+
+    async def picture(self, name: str) -> bytes:
+        """A picture uploaded on the screens (1.5.0), by its content name. Raises RuntimeError if it's
+        not there or isn't what the name says."""
+        if not PICTURE_NAME.fullmatch(name or ""):
+            raise RuntimeError("bad picture name")
+        s = await self._s()
+        async with s.get(f"{self.base}/pictures/{name}") as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"picture {name}: {resp.status}")
+            data = b""
+            async for chunk in resp.content.iter_chunked(65536):
+                data += chunk
+                if len(data) > images.MAX_BYTES:
+                    raise RuntimeError("picture too big")
+        # the name is the start of the picture's own fingerprint, so what arrived is what was meant
+        if hashlib.sha256(data).hexdigest()[:32] != name.split(".")[0]:
+            raise RuntimeError("picture doesn't match its name")
+        return data
 
     async def close(self) -> None:
         if self._session is not None:
@@ -356,15 +381,25 @@ class Daisho(commands.Cog):
         vs = await self.bot.db.voyages_starting_between(guild.id, iso(now - timedelta(days=14)),
                                                         iso(now + timedelta(days=120)))
         out = []
+        cog = self.bot.get_cog("Voyages")
+        tz = await cog.tz(guild.id) if cog else None
         for v in vs:
             r = await self.bot.db.rsvps(v.id)
+            series, choices = [], []
+            if cog is not None and v.status == "scheduled":     # 1.5.0: the series and its patterns
+                series = [{"date": d.isoformat(), "skipped": sk} for d, sk in await cog.series_dates(v, count=12)]
+                choices = [[label, code] for label, code in
+                           repeat_choices(datetime.fromisoformat(v.starts_at).astimezone(tz).date())]
             g = games.get(v.game_key)
             out.append({"id": v.id, "title": v.title, "description": v.description, "game_key": v.game_key,
                         "game": g.name if g else None, "size_label": v.size_label, "capacity": v.capacity,
                         "starts_at": v.starts_at, "duration_min": v.duration_min,
                         "reminders": short_reminders(v.reminder_minutes),
                         "reminders_text": format_reminders(v.reminder_minutes),
-                        "repeat": v.repeat, "status": v.status, "ping_role": v.ping_role,
+                        "repeat": v.repeat, "repeat_label": describe_repeat(v.repeat),
+                        "repeat_until": v.repeat_until, "series": series, "repeat_choices": choices,
+                        "local_date": datetime.fromisoformat(v.starts_at).astimezone(tz).date().isoformat() if tz else None,
+                        "status": v.status, "ping_role": v.ping_role, "image": v.image,
                         "organizer_id": v.organizer_id, "organizer": self.name_of(guild, v.organizer_id),
                         "channel_id": v.channel_id, "message_id": v.message_id,
                         "aboard": [self.name_of(guild, u) for u in r.aboard],
@@ -700,6 +735,34 @@ class Daisho(commands.Cog):
         posted = " Post it to update it in Discord." if page.messages else ""
         return f"Page {title} saved.{posted}"
 
+    async def apply_section_picture(self, guild, p: dict) -> str:
+        """Put an uploaded picture on a Notice Board section, or take it off (1.5.0)."""
+        db = self.bot.db
+        page = await db.get_page(int(p.get("id") or 0))
+        if page is None or page.guild_id != guild.id or page.kind != "custom":
+            raise ApplyError("That page no longer exists.")
+        sec = next((s for s in page.sections if s.id == p.get("section_id")), None)
+        if sec is None:
+            raise ApplyError("That section no longer exists; save the page and try again.")
+        number = page.sections.index(sec) + 1
+        if p.get("remove"):
+            if not sec.image:
+                return f"Section {number} had no picture."
+            if not (sec.heading or sec.body):
+                raise ApplyError(f"Section {number} is only a picture; give it a heading or text first, "
+                                 "or remove the whole section.")
+            await db.update_section(sec.id, image=None)
+            verb = "taken off"
+        else:
+            values = {"image": await self.picture_from(p)}
+            if p.get("image_style") in ("inside", "banner"):
+                values["image_style"] = p["image_style"]
+            await db.update_section(sec.id, **values)
+            verb = "on"
+        self.mark("pages")
+        posted = " Post the page to update it in Discord." if page.messages else ""
+        return f"Picture {verb} section {number} of {page.title}.{posted}"
+
     async def apply_page_post(self, guild, p: dict) -> str:
         board = self.bot.get_cog("Noticeboard")
         page = await self.bot.db.get_page(int(p.get("id") or 0))
@@ -834,6 +897,20 @@ class Daisho(commands.Cog):
             raise ApplyError("You're timed out in Discord, so that has to wait until the timeout ends.")
         return member
 
+    async def picture_from(self, p: dict) -> str:
+        """Fetch and keep the picture a change brings (1.5.0). Returns its stored name."""
+        name = p.get("picture")
+        if not isinstance(name, str) or not PICTURE_NAME.fullmatch(name) or self.client is None:
+            raise ApplyError("That picture arrived garbled; upload it again.")
+        try:
+            data = await self.client.picture(name)
+            return images.save_bytes(data, None, self.bot.config.data_dir)
+        except images.ImageError as e:
+            raise ApplyError(f"PlunderBot couldn't use that picture: {images.reason(e)}")
+        except (RuntimeError, aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            log.warning("Couldn't fetch picture %s from Daisho: %r", name, e)
+            raise ApplyError("PlunderBot couldn't fetch that picture from Daisho; upload it again.")
+
     async def apply_voyage_update(self, guild, p: dict) -> str:
         cog = self.bot.get_cog("Voyages")
         v = await self.bot.db.get_voyage(int(p.get("id") or 0))
@@ -882,12 +959,57 @@ class Daisho(commands.Cog):
             if p["ping_role"] not in ("off", "posted", "reminders"):
                 raise ApplyError("Pick when the game's role is tagged.")
             changes["ping_role"] = p["ping_role"]
-        if not changes:
+        if p.get("remove_picture") and "picture" not in p and v.image:
+            changes["image"] = None
+        skip_this = False
+        moved = "starts_at" in changes and v.repeat != "none"
+        if moved or any(k in p for k in ("repeat", "repeat_until", "skip", "unskip")):     # 1.5.0
+            if v.status != "scheduled":
+                raise ApplyError("That voyage has already started or ended, so it can't be changed.")
+            try:
+                until = p.get("repeat_until")
+                skip, unskip = self._dates(p.get("skip")), self._dates(p.get("unskip"))
+                if until not in (None, ""):
+                    if not isinstance(until, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", until):
+                        raise ApplyError("That end date can't be read.")
+                    until = self._dates([until])[0].isoformat()
+                repeat = p.get("repeat")
+                if repeat is not None and not isinstance(repeat, str):
+                    raise ApplyError("Pick how it repeats.")
+                series, skip_this = await cog.plan_series(
+                    dataclasses.replace(v, starts_at=changes.get("starts_at", v.starts_at)), await cog.tz(guild.id),
+                    repeat=repeat, until=until or None, clear_until="repeat_until" in p and not until,
+                    skip=skip, unskip=unskip, moved=moved)
+            except ParseError as e:
+                raise ApplyError(str(e))
+            changes.update(series)
+        if "picture" in p:              # 1.5.0: uploaded on the screens; fetched once all else is checked
+            changes["image"] = await self.picture_from(p)
+        if not changes and not skip_this:
             return "Nothing changed."
-        if await cog.apply_edit(guild, v.id, changes) is None:
+        if await cog.apply_series(guild, v, changes, skip_this) is None:
             raise ApplyError("That voyage has already started or ended, so it can't be changed.")
         self.mark("voyages")
+        if skip_this:
+            return f"Skipped {v.title} on this date; everyone who'd signed up was told, and the next one is posted."
         return f"Voyage {changes.get('title', v.title)} updated."
+
+    @staticmethod
+    def _dates(raw) -> list:
+        """ISO dates sent from the screens (1.5.0)."""
+        if raw in (None, "", []):
+            return []
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, list) or len(raw) > 30:
+            raise ApplyError("Those dates arrived garbled; try again.")
+        out = []
+        for d in raw:
+            try:
+                out.append(date.fromisoformat(str(d)))
+            except ValueError:
+                raise ApplyError("Those dates arrived garbled; try again.")
+        return out
 
     async def apply_voyage_cancel(self, guild, p: dict) -> str:
         cog = self.bot.get_cog("Voyages")
@@ -985,9 +1107,12 @@ class Daisho(commands.Cog):
             minutes = parse_reminders(str(p.get("reminders") or "") or None)
         except ParseError as e:
             raise ApplyError(str(e))
-        repeat = p.get("repeat") or "none"
-        if repeat not in REPEATS:
-            raise ApplyError("Pick how it repeats.")
+        tz = await cog.tz(guild.id)
+        try:
+            repeat = resolve_repeat(str(p.get("repeat") or "none"), starts.astimezone(tz).date())
+            until = cog.read_until(str(p.get("repeat_until") or "") or None, repeat, starts.astimezone(tz).date(), tz)
+        except ParseError as e:
+            raise ApplyError(str(e))
         ping = p.get("ping_role") or "posted"
         if ping not in ("off", "posted", "reminders"):
             raise ApplyError("Pick when the game's role is tagged.")
@@ -998,9 +1123,10 @@ class Daisho(commands.Cog):
         perms = channel.permissions_for(guild.me)
         if not (perms.view_channel and perms.send_messages and perms.embed_links):
             raise ApplyError(f"PlunderBot can't post in #{channel.name}.")
+        image = await self.picture_from(p) if p.get("picture") else None
         v = await cog.launch(guild, channel, member.id, title=title, description=description, profile=profile,
                              size_label=size_label, capacity=capacity, starts=starts, duration=duration,
-                             minutes=minutes, repeat=repeat, ping_role=ping)
+                             minutes=minutes, repeat=repeat, ping_role=ping, repeat_until=until, image=image)
         if v is None:
             raise ApplyError(f"PlunderBot couldn't post the voyage card in #{channel.name}.")
         self.mark("voyages")
@@ -1165,6 +1291,7 @@ HANDLERS = {
     "article.delete": Daisho.apply_article_delete,
     "page.save": Daisho.apply_page_save,
     "page.post": Daisho.apply_page_post,
+    "page.picture": Daisho.apply_section_picture,
     "voyage.update": Daisho.apply_voyage_update,
     "voyage.cancel": Daisho.apply_voyage_cancel,
     "crew.close": Daisho.apply_crew_close,

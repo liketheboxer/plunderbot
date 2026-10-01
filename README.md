@@ -23,8 +23,9 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/ship show` | Everyone | A ship's profile: captain, plunder, best haul, trusted crew, latest voyages |
 | `/ship fleet` | Everyone | The richest ships and pirates |
 | `/pirate profile` | Everyone | A pirate's profile: crews sailed, favourite games, ships, plunder. `/pirate set` for your gamertag and motto |
-| `/voyage create` | Everyone | Schedule a voyage: title, date (friday, tomorrow, 10/3), time (8pm), optional game and size, seats, details, reminders (default 1 day and 1 hour before; e.g. `2d, 3h, 15m` or `none`), repeat (weekly, every 2 weeks, monthly), length, a picture, and when to tag the game's ping role (when posted by default; or also at each reminder and when it sails; or never) |
-| `/voyage edit` | Organizer or mod | Change the title, date, time, details, reminders, seats, picture (or remove it) or when the game's role is tagged |
+| `/voyage create` | Everyone | Schedule a voyage: title, date (friday, tomorrow, 10/3), time (8pm), optional game and size, seats, details, reminders (default 1 day and 1 hour before; e.g. `2d, 3h, 15m` or `none`), repeat (every week, every 2 to 12 weeks, every month on the same date, or the same weekday like the 2nd Saturday or the last Friday) and an optional last date (`repeat_ends`), length, a picture, and when to tag the game's ping role (when posted by default; or also at each reminder and when it sails; or never) |
+| `/voyage edit` | Organizer or mod | Change the title, date, time, details, reminders, seats, picture (or remove it) or when the game's role is tagged; for a repeating voyage, how it repeats, its last date, and skip or unskip a date (skipping this voyage's own date cancels just it) |
+| `/voyage series` | Everyone | A repeating voyage's coming dates, skipped ones struck through |
 | `/voyage cancel` | Organizer or mod | Cancel one voyage, or with `whole_series:True` a repeating series |
 | `/voyage list` | Everyone | Upcoming voyages |
 | `/play` | Everyone in voice | Play a song name or a link in your voice channel (SoundCloud, Bandcamp, Twitch, radio, plain audio links, Spotify links, and YouTube when it's on). Playlists and albums load up to 50 tracks. `next:True` puts it at the front of the queue |
@@ -73,7 +74,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 ### How Colours (role menus) work
 
 - Each menu's card lists its roles with one button. Pressing it opens a private dropdown already ticked with the roles you wear; save it and you wear exactly those. Menus can be pick-one (regions) or pick-any.
-- Menus marked with `/colours onboarding` appear as buttons on the welcome-aboard message, alongside **Follow games**. Other menus live wherever they're posted (for Brimstone, #new-pirate-orientation), and the welcome-aboard message points there.
+- Menus marked with `/colours onboarding` appear as buttons on the welcome-aboard message, alongside **Follow games**. Other menus live wherever they're posted (for Brimstone, #pirate-profile), and the welcome-aboard message points there.
 - A region role sets the time zone PlunderBot reads your typed times in (see [How Voyages work](#how-voyages-work)). Picking a region too broad for one zone (Asia, South America) asks which zone is closest.
 - `/colours import` copies a MEE6 reaction-role message (emoji and roles) into a new menu; the old message is left alone until you delete it.
 - PlunderBot won't hand out roles with moderator permissions, roles above its own, or the Gangplank's Pending and Harbormaster roles (so nobody can let themselves aboard). The same goes for **Follow games** and article role actions.
@@ -132,7 +133,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 ### How Gangplank works
 
 - A newcomer joins, gets the **Pending** role, and PlunderBot welcomes them in #introductions: read the rules in #welcome, then introduce yourself and name your favorite game.
-- A **Harbormaster** reacts to their introduction (or to PlunderBot's welcome for them) with **Yar** to let them aboard: Pending comes off and PlunderBot points them to #new-pirate-orientation for roles, including a region role for their time zone. **Nar** kicks them. Nobody else's reactions count.
+- A **Harbormaster** reacts to their introduction (or to PlunderBot's welcome for them) with **Yar** to let them aboard: Pending comes off and PlunderBot points them to the orientation channel (#pirate-profile at Brimstone) for roles, including a region role for their time zone. **Nar** kicks them. Nobody else's reactions count.
 - Newcomers who never say anything get a reminder ping after 3 days and are kicked after 7 (with a friendly DM if their DMs are open). Anyone who has introduced themselves is never kicked automatically; that's the Harbormasters' call.
 - If Pending is taken off by hand, or the newcomer leaves, PlunderBot stops tracking them.
 - While they're Pending, newcomers can't use PlunderBot's slash commands (1.4.1; `/plunderbot` still says hello), Parley doesn't answer them, and the Daisho screens turn them away.

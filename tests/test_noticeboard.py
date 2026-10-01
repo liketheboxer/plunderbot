@@ -213,6 +213,19 @@ async def test_starter_guide(env):
     assert "already" in inter.response.sent[0][0]
 
 
+def test_starter_guide_links_this_servers_channels():
+    """1.5.0: #new-pirate-orientation is #pirate-profile now, and the guide links the real channels."""
+    from types import SimpleNamespace
+
+    from plunderbot.cogs.noticeboard import STARTER_GUIDE, starter_text
+    text = "\n".join(body for _, body in STARTER_GUIDE)
+    assert "{profile}" in text and "orientation" not in text.lower()
+    linked = starter_text(text, SimpleNamespace(orientation_channel_id=77, voyage_channel_id=88))
+    assert "<#77>" in linked and "<#88>" in linked and "{" not in linked
+    plain = starter_text(text, SimpleNamespace(orientation_channel_id=None, voyage_channel_id=None))
+    assert "#pirate-profile" in plain and "#brimstone-events" in plain
+
+
 # ------------------------------------------------------------ Game Index and following
 class Thread:
     def __init__(self, tid, name):

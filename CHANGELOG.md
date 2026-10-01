@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.5.0 (2026-10-01): Repeating voyages, pictures from the screens
+
+Pairs with The Magical Samurai 1.18.0.
+
+**Repeating voyages**
+
+- More patterns: every week, every 2 to 12 weeks, every month on the same date, and every month on the same weekday (the 2nd Saturday, or the last Friday). `/voyage create`'s **repeat** now offers them, spelled out for the date you typed, and takes "every 6 weeks" typed in.
+- A series can **end on a date** (`repeat_ends`) and **skip dates**. `/voyage edit` changes all of it: **repeat** (or Doesn't repeat to stop), **repeat_ends** (a date, or never), **skip** and **unskip**, each with the series' own dates to pick from. Skipping this voyage's own date cancels just it, tells everyone who'd signed up, and posts the next one.
+- **`/voyage series`** lists a repeating voyage's coming dates, skipped ones struck through.
+- A new pattern, or moving a repeating voyage to another day or time, starts the series again from that voyage: "the same date each month" and the time of day count from there, and a "2nd Saturday" voyage moved to a Tuesday becomes the 2nd Tuesday. A move past the series' last date is refused.
+- The card says how it repeats ("Every month on the last Friday until Mar 31, 2027").
+- Fix: re-planning or cancelling the next voyage of a series while the one before it was still under sail could bring the old series back (a duplicate voyage, or one the organizer had just stopped). A series is now carried on only once, from its latest voyage.
+- Fix: a voyage that fell in the daylight-saving gap (2:30 on the night clocks go forward) no longer moves the rest of its series an hour later.
+
+**From Daisho's screens**
+
+- Voyages and the series: everything above, in `voyage.update` and `voyage.create` (`repeat`, `repeat_until`, `skip`, `unskip`). The voyages snapshot adds `repeat_label`, `repeat_until`, `series` (the coming dates, and which are skipped), `repeat_choices` (spelled out for the voyage's date), `local_date` and `image`.
+- **Pictures:** a picture uploaded on the screens comes with the change as its name; PlunderBot fetches it from Daisho, checks it's the picture the name says (the name is the start of its SHA-256), and keeps its own copy as for pictures added in Discord. Voyages (`picture`, `remove_picture`, on create too) and Notice Board sections (new `page.picture`, with the banner or inside setting).
+
+**Other**
+
+- `/noticeboard starter`'s Pirate's Guide links the server's own profile and voyage channels (#new-pirate-orientation is #pirate-profile at Brimstone now), and the Gangplank setup and README say #pirate-profile.
+
 ## 1.4.1 (2026-09-30): Security check fixes
 
 Pairs with The Magical Samurai 1.17.1.

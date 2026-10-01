@@ -467,7 +467,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
                            pending_role="The airlock role newcomers wear (Pending)",
                            harbormaster_role="Who can let people aboard or turn them away (Harbormasters)",
                            rules_channel="Linked in the welcome (#welcome)",
-                           orientation_channel="Linked once they're aboard (#new-pirate-orientation)",
+                           orientation_channel="Where newcomers set up their profile and roles, linked once they're aboard (#pirate-profile)",
                            alert_channel="Optional: where Harbormasters hear about new intros and kicks")
     async def gangplank_setup(self, interaction: discord.Interaction, intro_channel: discord.TextChannel,
                               pending_role: discord.Role, harbormaster_role: discord.Role,
