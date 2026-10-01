@@ -268,3 +268,23 @@ async def test_game_activity_counts_crews_and_followers(env):
     assert lines[0].startswith("- Sea of Thieves: 2 crew(s) set sail with 2 different pirate(s)")
     assert lines[1].startswith("- Deep Rock Galactic: 1 crew(s)")
     assert "- Helldivers 2: 0 crew(s) set sail with 0 different pirate(s) in the last 30 days, 4 follower(s)" in out
+
+
+async def test_deleting_the_question_still_counts(env):
+    """1.4.1: the reply is counted before Claude is asked, so deleting the question can't dodge the limit."""
+    bot, cog, guild = env
+    cog.claude = FakeClaude([said("Ahoy!")])
+
+    class Gone(Msg):
+        async def reply(self, text, **kw):
+            raise discord.NotFound(SimpleNamespace(status=404, reason="x"), "Unknown message")
+    sent = []
+    chan = Chan()
+
+    async def send(text, **kw):
+        sent.append(text)
+    chan.send = send
+    msg = Gone(guild, member(), f"<@{BOT_ID}> tell me a long story", chan)
+    await cog.on_message(msg)
+    day, _, _ = cog.today(await bot.db.get_settings(5))
+    assert await bot.db.parley_replies(5, 1, day) == 1 and sent == ["<@1> Ahoy!"]

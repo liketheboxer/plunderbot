@@ -34,6 +34,28 @@ COGS = [
 
 
 class PlunderTree(app_commands.CommandTree):
+    OPEN_TO_NEWCOMERS = ("plunderbot",)   # hello and version
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Newcomers still on the Gangplank (the Pending role) can't use PlunderBot's commands until a
+        Harbormaster lets them aboard (1.4.1): no role pings, voyages or music from a raid account."""
+        guild, user = interaction.guild, interaction.user
+        cmd = interaction.command
+        if guild is None or cmd is None or not hasattr(user, "get_role"):
+            return True
+        if (getattr(cmd, "root_parent", None) or cmd).name in self.OPEN_TO_NEWCOMERS:
+            return True
+        s = await self.client.db.get_settings(guild.id)
+        if s.pending_role_id and user.get_role(s.pending_role_id) is not None \
+                and not getattr(user.guild_permissions, "manage_guild", False):
+            if getattr(interaction, "type", None) != discord.InteractionType.autocomplete:   # suggestions just stay empty
+                try:
+                    await interaction.response.send_message(voice.say("gangplank_commands"), ephemeral=True)
+                except discord.HTTPException:
+                    pass
+            return False
+        return True
+
     async def on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         if isinstance(error, app_commands.NoPrivateMessage):
             text = voice.say("guild_only")

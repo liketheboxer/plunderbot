@@ -146,6 +146,9 @@ def read_response(resp: dict) -> Haul | None:
     return None
 
 
+MAX_IMAGE_PIXELS = 40_000_000   # a 4K screenshot is 8 million
+
+
 def prepare_image(data: bytes) -> tuple[str, str]:
     """(media type, base64) small enough for Claude. Big screenshots are scaled down to a JPEG."""
     from .images import ImageError, sniff
@@ -159,12 +162,18 @@ def prepare_image(data: bytes) -> tuple[str, str]:
     if Image is not None:
         try:
             with Image.open(io.BytesIO(data)) as img:
+                # a tiny file can claim to be enormous (a "decompression bomb"): refuse before decoding (1.4.1)
+                if img.size[0] * img.size[1] > MAX_IMAGE_PIXELS:
+                    raise ImageError("too large to read (over 40 megapixels)")
                 if max(img.size) > MAX_IMAGE_EDGE or len(data) > MAX_IMAGE_BYTES:
+                    img.draft("RGB", (MAX_IMAGE_EDGE, MAX_IMAGE_EDGE))   # JPEGs decode straight at a small size
                     img = img.convert("RGB")
                     img.thumbnail((MAX_IMAGE_EDGE, MAX_IMAGE_EDGE))
                     out = io.BytesIO()
                     img.save(out, "JPEG", quality=88)
                     data, kind = out.getvalue(), "image/jpeg"
+        except Image.DecompressionBombError as e:      # Pillow's own limit, for pictures far past ours
+            raise ImageError("too large to read (over 40 megapixels)") from e
         except (OSError, ValueError) as e:
             raise ImageError(f"couldn't open the picture ({e})") from e
     if len(data) > MAX_IMAGE_BYTES:

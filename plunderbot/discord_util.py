@@ -16,6 +16,20 @@ def elevated(p: discord.Permissions) -> bool:
                 p.view_audit_log, p.move_members, p.mute_members, p.deafen_members))
 
 
+def above_their_reach(user, role: discord.Role) -> str | None:
+    """Why this member may not hand out a role through PlunderBot (1.4.1): as in Discord itself, it takes
+    Manage Roles and a top role above it (the server owner excepted). None if they may."""
+    guild = getattr(user, "guild", None)
+    if guild is not None and user.id == guild.owner_id:
+        return None
+    perms = getattr(user, "guild_permissions", None)
+    if perms is None or not perms.manage_roles:
+        return "You need Manage Roles to hand out roles through me."
+    if not role < user.top_role:
+        return f"{role.name} is at or above your own top role, so you can't hand it out."
+    return None
+
+
 def self_serve_problem(role: discord.Role, me: discord.Member, gated: dict[int, str] | None = None) -> str | None:
     """Why members can't be allowed to give themselves this role, or None if they can.
     `gated` is the Gangplank's roles (db.gated_roles): Pending and Harbormaster must never be self-serve,

@@ -15,7 +15,7 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 
-from .. import games, voice
+from .. import voice
 from ..crew_logic import iso
 from ..news_logic import (FORTNITE_NEWS_URL, NewsItem, new_items, parse_feed, parse_fortnite, parse_steam,
                           source_for, steam_url)

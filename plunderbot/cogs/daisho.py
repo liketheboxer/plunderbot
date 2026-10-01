@@ -15,12 +15,13 @@ token). Without them it does nothing, and if Daisho is down PlunderBot carries o
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import time
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import aiohttp
 import discord
@@ -40,6 +41,7 @@ log = logging.getLogger("plunderbot.daisho")
 
 POLL_SECONDS = 15
 FAST_SECONDS = 3        # while the music's on, so the Jukebox screen's buttons land quickly (1.4.0)
+MUSIC_WAIT = 40         # seconds a Jukebox song may take to look up before it's given up on
 HEARTBEAT = 30          # while a track plays, re-send the music at least this often, so the screen knows it's live
 PUSH_EVERY = 300        # send what changed
 FORCE_EVERY = 1800      # send everything anyway, so Daisho knows we're alive
@@ -827,6 +829,9 @@ class Daisho(commands.Cog):
         pending = (await self.bot.db.get_settings(guild.id)).pending_role_id
         if pending and any(r.id == pending for r in getattr(member, "roles", [])):
             raise ApplyError("You're still on the Gangplank; a Harbormaster needs to let you aboard first.")
+        timed_out = getattr(member, "is_timed_out", None)
+        if callable(timed_out) and timed_out():      # a Discord timeout covers the screens too (1.4.1)
+            raise ApplyError("You're timed out in Discord, so that has to wait until the timeout ends.")
         return member
 
     async def apply_voyage_update(self, guild, p: dict) -> str:
@@ -926,9 +931,12 @@ class Daisho(commands.Cog):
             profile = games.get(crew.game_key)
             emoji, _ = await cog.emoji_for(guild.id, profile, crew.size_label)
             captain = guild.get_member(crew.captain_id)
-            await cog._rename_channel(vc, voice_channel_name(profile, crew.size_label,
-                                                             captain.display_name if captain else "Captain",
-                                                             emoji, crew.title))
+            # in the background, as /crew rename does: Discord allows two channel renames per ten minutes,
+            # and waiting out that limit here would hold up every other change (1.4.1)
+            task = asyncio.create_task(cog._rename_channel(vc, voice_channel_name(
+                profile, crew.size_label, captain.display_name if captain else "Captain", emoji, crew.title)))
+            cog._background.add(task)
+            task.add_done_callback(cog._background.discard)
         return "Crew renamed."
 
     async def _needs_member(self, guild, p: dict):
@@ -1124,11 +1132,17 @@ class Daisho(commands.Cog):
         query = " ".join(str(p.get("query") or "").split())[:300]
         if not query:
             raise ApplyError("Say what to play: a song name or a link.")
-        ok, text, start = await cog.enqueue(guild, member, None, query, front=p.get("front") is True, crew=crew)
+        try:      # a slow link mustn't hold up every other change (1.4.1)
+            ok, text, start = await asyncio.wait_for(
+                cog.enqueue(guild, member, None, query, front=p.get("front") is True, crew=crew), MUSIC_WAIT)
+        except asyncio.TimeoutError:
+            raise ApplyError("That link took too long to look up. Try another, or a song name.")
         if not ok:
             raise ApplyError(plain(text))
-        if start:
-            await cog.advance(guild, cog.players[guild.id])
+        if start:     # starting the first track looks its stream up too: let it happen after this reply
+            task = asyncio.create_task(cog.advance(guild, cog.players[guild.id]))
+            cog._background.add(task)
+            task.add_done_callback(cog._background.discard)
         return plain(text)
 
     async def apply_music_control(self, guild, p: dict) -> str:

@@ -18,14 +18,14 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from .. import images, voice
-from ..articles_logic import (ACTIONS, BOOST, COOLDOWN_SCOPES, COUNT, JOIN, KEYWORD, LEAVE, MATCHES, MAX_ACTIONS,
+from ..articles_logic import (BOOST, COOLDOWN_SCOPES, COUNT, JOIN, KEYWORD, LEAVE, MATCHES, MAX_ACTIONS,
                               MESSAGE_TRIGGERS, PIN, REACT, REACTION, REPLY, REPOST, ROLE, ROLE_ADDED, ROLE_REMOVED,
                               SCHEDULE, TRIGGERS, action_problem, clean_name, cooldown_key, describe_action,
                               describe_trigger, fill, keyword_hit, next_run, ordinal, parse_schedule, pick, rolls,
                               server_emoji, split_keywords, split_replies)
 from ..birthday_logic import zone
 from ..crew_logic import iso
-from ..discord_util import self_serve_problem
+from ..discord_util import above_their_reach, self_serve_problem
 from ..voyage_logic import ParseError
 
 log = logging.getLogger("plunderbot.articles")
@@ -254,7 +254,8 @@ class Articles(commands.GroupCog, group_name="articles", group_description="The 
         article = await self.find(interaction, name)
         if article is None:
             return
-        problem = self_serve_problem(role, interaction.guild.me, await self.bot.db.gated_roles(interaction.guild_id))
+        problem = (self_serve_problem(role, interaction.guild.me, await self.bot.db.gated_roles(interaction.guild_id))
+                   or above_their_reach(interaction.user, role))
         if problem:
             await self._say(interaction, problem)
             return

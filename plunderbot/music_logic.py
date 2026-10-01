@@ -146,7 +146,9 @@ def progress_bar(position: float, duration: int | None, width: int = 16) -> str:
 def ffmpeg_options(start: int = 0, headers: dict | None = None, live: bool = False) -> tuple[str, str]:
     """(before_options, options) for FFmpeg: reconnect on dropped connections, start at `start` seconds,
     pass the source's own HTTP headers, and drop any video."""
-    before = ["-reconnect 1", "-reconnect_streamed 1", "-reconnect_delay_max 5", "-nostdin"]
+    # network protocols only: FFmpeg never opens a local file or a pipe, whatever a page hands it (1.4.1)
+    before = ["-protocol_whitelist http,https,tls,tcp,crypto", "-reconnect 1", "-reconnect_streamed 1",
+              "-reconnect_delay_max 5", "-nostdin"]
     if start > 0 and not live:
         before.append(f"-ss {int(start)}")
     if headers:

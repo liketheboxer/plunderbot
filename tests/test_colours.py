@@ -59,6 +59,17 @@ class Role:
     def __ge__(self, other):
         return self.position >= other.position
 
+    def __lt__(self, other):
+        return self.position < other.position
+
+
+def quartermaster(uid=1):
+    """Someone allowed to hand out the test roles: Manage Roles, and a top role above them (1.4.1)."""
+    m = Member(uid)
+    m.guild_permissions = SimpleNamespace(manage_roles=True)
+    m.top_role = Role(0, "Quartermasters", position=40)
+    return m
+
 
 class Member:
     def __init__(self, uid, *roles, bot=False):
@@ -246,7 +257,7 @@ async def test_import_from_a_mee6_message(env):
             return SimpleNamespace(content="", embeds=[embed], author=SimpleNamespace(id=0))
 
     guild.channels[77] = Channel()
-    inter = interaction(guild, Member(1))
+    inter = interaction(guild, quartermaster())
     await cog.import_.callback(cog, inter, f"https://discord.com/channels/5/77/88",
                                SimpleNamespace(value="single", name="one"))
     new = await bot.db.menu_by_key(5, "react-for-region-roles")
@@ -292,7 +303,7 @@ async def test_import_by_name_and_by_who_reacted(env):
 
     guild.channels[77] = Channel()
     guild.me.id = 999
-    inter = interaction(guild, Member(1))
+    inter = interaction(guild, quartermaster())
     await cog.import_.callback(cog, inter, "https://discord.com/channels/5/77/88",
                                SimpleNamespace(value="single", name="one"))
     new = await bot.db.menu_by_key(5, "react-for-region-roles")

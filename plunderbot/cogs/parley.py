@@ -16,7 +16,7 @@ import discord
 from discord.ext import commands
 
 from .. import games, voice
-from ..ai import AIError, Claude, Kagi
+from ..ai import Claude, Kagi
 from ..birthday_logic import upcoming, zone
 from ..discord_util import addressed_to
 from ..parley_logic import (COMMANDS_HELP, COOLDOWN_SECONDS, MAX_ROUNDS, TOOLS, build_messages, cost, refusal,
@@ -46,6 +46,17 @@ class Parley(commands.Cog):
     def addressed(self, message: discord.Message) -> bool:
         me = self.bot.user
         return me is not None and addressed_to(me.id, message)
+
+    @staticmethod
+    def public_channel(guild, channel_id: int | None) -> bool:
+        """Whether everyone in the server can see a channel (1.4.1): Parley only repeats what's posted
+        where anyone could read it, so a staff-only card or an unposted page stays private."""
+        channel = guild.get_channel(channel_id) if channel_id else None
+        base = getattr(channel, "parent", None) or channel
+        try:
+            return base is not None and base.permissions_for(guild.default_role).view_channel
+        except (AttributeError, TypeError):
+            return False
 
     async def allowed_here(self, message: discord.Message) -> bool:
         channel = message.channel
@@ -108,6 +119,9 @@ class Parley(commands.Cog):
             await message.reply(voice.say("parley_hello"), mention_author=False,
                                 allowed_mentions=discord.AllowedMentions.none())
             return
+        # counted before Claude is asked (1.4.1): deleting the question before the reply lands used to skip
+        # the count, so the daily limit could be dodged
+        await self.bot.db.add_parley_reply(guild.id, author.id, day)
         history = await self.history(message)
         saved = await self.bot.db.member_timezone(author.id)
         asker_zone = zone_label(zone_from_name(saved), local) if saved else ""
@@ -119,9 +133,12 @@ class Parley(commands.Cog):
         messages = build_messages(history, question, author.display_name)
         async with message.channel.typing():
             text = await self.converse(guild, s, system, messages, day, month, author, message.channel)
-        await message.reply(safe(text) or voice.say("parley_error"), mention_author=False,
-                            allowed_mentions=discord.AllowedMentions.none())
-        await self.bot.db.add_parley_reply(guild.id, author.id, day)
+        try:
+            await message.reply(safe(text) or voice.say("parley_error"), mention_author=False,
+                                allowed_mentions=discord.AllowedMentions.none())
+        except discord.NotFound:       # they deleted the question: answer in the channel, saying whom to
+            await message.channel.send(f"<@{author.id}> " + (safe(text) or voice.say("parley_error")),
+                                       allowed_mentions=discord.AllowedMentions.none())
 
     async def converse(self, guild, s, system: str, messages: list[dict], day: str, month: str,
                        author=None, channel=None) -> str:
@@ -145,8 +162,8 @@ class Parley(commands.Cog):
                     out = await self.run_tool(guild, s, block.get("name"), block.get("input") or {}, day,
                                               author, channel)
                 except Exception as e:
-                    log.warning("Parley tool %s failed: %s", block.get("name"), e)
-                    out = f"That didn't work: {e}"
+                    log.warning("Parley tool %s failed: %s", block.get("name"), e, exc_info=True)
+                    out = "That didn't work because of a problem inside PlunderBot; say so and suggest the slash command."
                 results.append({"type": "tool_result", "tool_use_id": block.get("id"), "content": out[:6000]})
             messages.append({"role": "user", "content": results})
         return reply_text(content)
@@ -204,7 +221,7 @@ class Parley(commands.Cog):
         if name == "upcoming_voyages":
             from ..crew_logic import iso
             vs = [v for v in await db.voyages_starting_between(guild.id, iso(now), iso(now + timedelta(days=14)))
-                  if v.status == "scheduled"]
+                  if v.status == "scheduled" and self.public_channel(guild, v.channel_id)]
             if not vs:
                 return "No voyages scheduled in the next 14 days. Anyone can plan one with /voyage create."
             lines = []
@@ -217,7 +234,7 @@ class Parley(commands.Cog):
                 lines.append(f"- #{v.id} {v.title} ({game}) at <t:{stamp}:F>, organized by <@{v.organizer_id}>, {seats} {link}")
             return "\n".join(lines)
         if name == "open_crews":
-            crews = await db.active_crews(guild.id)
+            crews = [c for c in await db.active_crews(guild.id) if self.public_channel(guild, c.channel_id)]
             if not crews:
                 return "No crews are mustering or sailing right now. Start one with /crew start."
             lines = []
@@ -242,7 +259,8 @@ class Parley(commands.Cog):
                      + (" (has a ping role)" if e.get("role_id") else "") for e in entries]
             return "\n".join(lines) + "\nMembers follow games (ping role + thread) with /follow."
         if name == "server_pages":
-            pages = [p for p in await db.pages(guild.id) if p.kind == "custom"]
+            pages = [p for p in await db.pages(guild.id)
+                     if p.kind == "custom" and p.message_ids and self.public_channel(guild, p.channel_id)]
             want = (args.get("page") or "").lower().strip()
             if not want:
                 return "Pages: " + ", ".join(f"{p.title} (in <#{p.channel_id}>)" if p.channel_id else p.title

@@ -2,7 +2,7 @@
 
 **P**irate **L**ogistics, **U**nsolicited **N**autical **D**rivel & **E**vent **R**eminders: the bright, bubbly robot butler of Brimstone Hill Fortress.
 
-A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.4.0 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho), plus **music** in voice channels. The full plan is the *PlunderBot Scope & Design* doc.
+A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and reports telemetry to The Magical Samurai. Version 1.4.1 covers **all nine phases**: the foundation, Birthdays, Crew Call, Voyages, Gangplank and the Notice Board, the Ship's Log and Crow's Nest, Parley, the Ship's Ledger, Articles, and its screens in The Magical Samurai (Daisho), plus **music** in voice channels. The full plan is the *PlunderBot Scope & Design* doc.
 
 ## Commands
 
@@ -63,7 +63,8 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - **Sources:** SoundCloud, Bandcamp, Twitch (live too), internet radio and plain audio links, through [yt-dlp](https://github.com/yt-dlp/yt-dlp) and FFmpeg. Song names are searched on SoundCloud, or on YouTube once it's on. **Spotify** only shares song details, never audio: with a Spotify key, a Spotify track, album or playlist becomes a list of songs that are found on YouTube (or SoundCloud) when their turn comes. Spotify's own editorial playlists are off limits to apps.
 - **YouTube** is off until a Quartermaster runs `/admin music youtube on`. Restreaming YouTube is against YouTube's terms, and YouTube turns away servers it thinks are bots, so PlunderBot signs in with a **throwaway** account's cookies (never a real account: YouTube can close accounts it thinks are automated). When YouTube refuses, the track is skipped with a note; everything else keeps working.
 - **Who steers:** anyone in the voice channel with PlunderBot, and anyone with Manage Channels. With a DJ role (`/admin music djrole`), skipping someone else's track, stop, clear, remove, move, shuffle, repeat, seek and volume need that role, unless you're the only one listening; you can always skip your own track.
-- PlunderBot leaves after 5 quiet minutes (nothing playing, or nobody listening), unless **24/7** is on. Tracks over 3 hours are turned away (live streams are fine). The queue holds 200.
+- PlunderBot leaves after 5 quiet minutes (nothing playing, or nobody listening), unless **24/7** is on. Tracks over 3 hours are turned away, in playlists too (live streams are fine). The queue holds 200, and one member can have at most 50 waiting (mods and Daisho crew aren't limited).
+- **Links stay on the public internet** (1.4.1): a link whose address is PlunderBot's own network (127.0.0.1, private addresses, the cloud metadata address) is refused, and so is a page that hands back a stream address like that or a local file. FFmpeg only ever opens web addresses.
 - **The Jukebox screen** (1.4.0): Daisho's PlunderBot screens have a **Jukebox** (`plunderbot.magicalsamurai.com/jukebox`) showing what's playing, how far in, who asked for it and the queue, updating itself. Members add songs there (with nothing playing, PlunderBot joins the voice channel they're in) and steer with the same buttons as in Discord plus **Next** and **✕** per queued track, as themselves and by the same rules: be in PlunderBot's voice channel, and the DJ role applies. Daisho crew with its Voyages permission steer from anywhere, like a mod. While PlunderBot is in voice it checks Daisho every 3 seconds instead of 15, so button presses land in a few seconds.
 - **Ask PlunderBot** (1.3.1): @mention it with "play something piratey" or "queue Wellerman next" and Parley picks and queues a song for you, with the same checks as `/play` (you must be in a voice channel). It can also tell you what's playing. It can't skip or stop; those stay with the buttons and `/music`.
 - Lyrics come from [LRCLIB](https://lrclib.net), an open lyrics database, and are shown only to whoever asks.
@@ -134,6 +135,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 - A **Harbormaster** reacts to their introduction (or to PlunderBot's welcome for them) with **Yar** to let them aboard: Pending comes off and PlunderBot points them to #new-pirate-orientation for roles, including a region role for their time zone. **Nar** kicks them. Nobody else's reactions count.
 - Newcomers who never say anything get a reminder ping after 3 days and are kicked after 7 (with a friendly DM if their DMs are open). Anyone who has introduced themselves is never kicked automatically; that's the Harbormasters' call.
 - If Pending is taken off by hand, or the newcomer leaves, PlunderBot stops tracking them.
+- While they're Pending, newcomers can't use PlunderBot's slash commands (1.4.1; `/plunderbot` still says hello), Parley doesn't answer them, and the Daisho screens turn them away.
 - An optional alert channel tells Harbormasters about new introductions, approvals, rejections and kicks.
 
 ### How Voyages work
@@ -280,3 +282,9 @@ With `DEV_GUILD_ID` set, commands sync to that one server instantly instead of g
 - PlunderBot never pings @everyone. The only role pings are opt-in game roles on crew calls. Toasts ping only the birthday members; sailing pings only the crew.
 - Schema changes are new entries at the end of `MIGRATIONS`; never edit one that has shipped.
 - Version in `VERSION`, changes in `CHANGELOG.md`, a `vX.Y.Z` tag per release.
+- Every check lives in one place and every way in uses it: slash commands, buttons, Parley and the Daisho screens all go through the same function (`Music.control`/`may_steer`, `Voyages.launch`, `CrewCall.open_call`, `self_serve_problem` plus `above_their_reach` for roles). A new way in calls that function; it never re-implements the rule.
+- Anything a member types that PlunderBot fetches (a song link, a picture URL) goes through `netguard.public_url` first, and again on whatever address the fetch hands back. FFmpeg gets `-protocol_whitelist`.
+- Members still on the Gangplank can't use commands (`PlunderTree.interaction_check`), Parley or the screens. Buttons don't pass through that check, so anything a Pending member could reach must check for themselves.
+- Anything that costs money (Parley, Ledger reads) counts against the member's daily limit **before** the call, and against the month's budget.
+- Daisho change handlers never wait on Discord rate limits or slow lookups: background tasks or `asyncio.wait_for`.
+- Pictures are size-checked (pixels, not just bytes) before decoding, and decoded off the event loop.

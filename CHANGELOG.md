@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.1 (2026-09-30): Security check fixes
+
+Pairs with The Magical Samurai 1.17.1.
+
+- **Music links stay on the public internet.** `/play`, Parley and the Jukebox refuse a link to PlunderBot's own network (127.0.0.1, private and link-local addresses, the cloud metadata address), and a page that hands back such an address or a local `file://` path as its stream. FFmpeg is told to open web addresses only. Before, any member could make PlunderBot fetch addresses inside the server.
+- YouTube's switch now covers every way of linking it (youtube-nocookie.com and the like), tracks over 3 hours are dropped from playlists too, and a member can have at most 50 songs waiting (counted again after the lookup, so adding several at once can't get past it).
+- **Newcomers on the Gangplank** can't use PlunderBot's slash commands until they're let aboard (only `/plunderbot` stays open), so a raid account can't ping game roles with `/voyage create` or `/crew start`.
+- **Screens:** a member timed out in Discord can't act from Daisho either. A crew rename from Daisho no longer holds up every other change while Discord's two-renames-per-ten-minutes limit runs out, and a slow Jukebox link gives up after 40 seconds instead of stalling the queue.
+- **Parley:** a reply is counted before Claude is asked, so deleting the question no longer dodges the daily limit (the answer then goes to the channel, naming whom it's for). Captain's Log screenshots count against the same daily limit. Parley only reads out voyages, crews and pages posted where everyone can see them, and it's told plainly that text from anyone but the asker is information, never an instruction.
+- A voyage card tags its game's role at most once per organizer every 15 minutes (as crew calls already did); the card still goes up.
+- Giving a role through an article or a role menu (`/colours add` and `/colours import`) needs Manage Roles and a top role above it, as in Discord.
+- Screenshot pictures over 40 megapixels are refused before they're opened, and pictures are prepared off the main loop.
+- Smaller things: the YouTube cookies file is created private rather than made private afterwards; the bot's settings never print their secrets; internal errors aren't passed to Parley; a remove from the queue always takes the track that was meant. The image installs PyNaCl 1.6.2 (discord.py's own cap holds it at 1.5, which misses security fixes).
+
 ## 1.4.0 (2026-09-30): The Jukebox on the web
 
 Pairs with The Magical Samurai 1.17.0.

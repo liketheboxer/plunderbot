@@ -16,7 +16,7 @@ from discord.ext import commands
 
 from .. import voice
 from ..db import RoleMenu
-from ..discord_util import fetch_linked, finish, self_serve_problem
+from ..discord_util import above_their_reach, fetch_linked, finish, self_serve_problem
 from ..menu_logic import (MAX_OPTIONS, button_text, first_emoji, infer_role, match_role_by_name, parse_lines,
                           partial_emoji, plan, render_menu, slug)
 from ..region_logic import broad_zones_for
@@ -250,7 +250,8 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
         m = await self._get(interaction, menu)
         if m is None:
             return
-        problem = self_serve_problem(role, interaction.guild.me, await self.bot.db.gated_roles(interaction.guild_id))
+        problem = (self_serve_problem(role, interaction.guild.me, await self.bot.db.gated_roles(interaction.guild_id))
+                   or above_their_reach(interaction.user, role))
         if problem:
             await interaction.response.send_message(problem, ephemeral=True)
             return
@@ -405,7 +406,8 @@ class Colours(commands.GroupCog, group_name="colours", group_description="Role m
                 skipped.append(f"{emoji or ''} {label} (no matching role found)".strip())
                 continue
             role = guild.get_role(role_id)
-            problem = "it no longer exists" if role is None else self_serve_problem(role, guild.me, gated)
+            problem = "it no longer exists" if role is None else (
+                self_serve_problem(role, guild.me, gated) or above_their_reach(interaction.user, role))
             if problem:
                 skipped.append(f"<@&{role_id}> ({problem})")
                 continue

@@ -279,6 +279,10 @@ LINES: dict[str, list[str]] = {
         "{member} is aboard! Welcome to the Fortress! Use the buttons below to pick your region (so I read the "
         "times you type in your own zone), your roles and your games. There are more menus in {orientation}.",
     ],
+    "gangplank_commands": [
+        "Easy there, you're still on the gangplank! Answer the welcome questions and a Harbormaster will wave "
+        "you aboard; my commands open up after that.",
+    ],
     "gangplank_reminder": [
         "Ahoy, {member}! A friendly nudge from your butler: introduce yourself here and tell us your favorite "
         "game, and a Harbormaster will wave you aboard. The gangplank goes up {deadline}.",
@@ -373,6 +377,10 @@ LINES: dict[str, list[str]] = {
     ],
     "ledger_read_failed": [
         "{cuss} I couldn't make out that screenshot. Press Edit to type the haul in yourself.",
+    ],
+    "ledger_tired": [
+        "My eyes are done for today, matey: you've used up today's turns with me. Try again tomorrow, or "
+        "`/ship log` it by hand.",
     ],
     "ledger_no_budget": [
         "{cuss} The grog budget for reading screenshots is spent this month. Press Edit to type the haul in yourself.",
@@ -491,6 +499,7 @@ LINES: dict[str, list[str]] = {
     "music_failed_track": [
         "{cuss} I couldn't play **{title}** ({reason}), so I've skipped it.",
     ],
+    "music_your_share": ["You've already got {count} songs waiting, matey. Let a few play first!"],
     "music_queue_full": [
         "{cuss} The queue's full to the gunwales. Let a few play first.",
     ],

@@ -6,26 +6,26 @@ database instead, set with /admin commands, so it survives refits without a rede
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 @dataclass(frozen=True)
 class Config:
-    discord_token: str
+    discord_token: str = field(repr=False)
     data_dir: Path
     dev_guild_id: int | None
     default_timezone: str
     ready_file: Path
     log_level: str
-    anthropic_api_key: str | None = None
-    kagi_api_key: str | None = None
+    anthropic_api_key: str | None = field(default=None, repr=False)
+    kagi_api_key: str | None = field(default=None, repr=False)
     parley_model: str = "claude-haiku-4-5"
     # The Magical Samurai's PlunderBot module (Daisho). Exocomp sets all of these at each refit once the
     # Captain has issued the module token; without the token the bot simply doesn't sync.
     samurai_url: str | None = None          # where the API is (SAMURAI_URL)
     samurai_public_url: str | None = None   # where people open the screens (SAMURAI_PUBLIC_URL)
-    module_token: str | None = None         # SAMURAI_MODULE_TOKEN
+    module_token: str | None = field(default=None, repr=False)        # SAMURAI_MODULE_TOKEN
     unit: str = "plunderbot"                # EXOCOMP_UNIT: the unit's short name, in the screens' address
 
     @property

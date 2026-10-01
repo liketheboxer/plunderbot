@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import discord
 from discord import app_commands
@@ -16,10 +16,10 @@ from discord.ext import commands, tasks
 
 from .. import links, crew_emoji, games, images, voice
 from ..birthday_logic import zone
-from ..crew_logic import iso, now_utc
+from ..crew_logic import PING_COOLDOWN, iso, now_utc
 from ..db import Voyage
 from ..mentions import send_pinging
-from ..voyage_logic import (REMINDER_PRESETS, REPEATS, ParseError, Rsvps, due_reminder, format_reminders,
+from ..voyage_logic import (REMINDER_PRESETS, REPEATS, ParseError, due_reminder, format_reminders,
                             is_weekday_name, next_occurrence, overdue_reminders, parse_date, parse_reminders,
                             parse_time, placement, render_voyage, split_zone, to_utc, zone_label)
 
@@ -84,6 +84,7 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
     def __init__(self, bot):
         self.bot = bot
         self.lock = asyncio.Lock()
+        self.last_ping: dict[tuple[int, int], object] = {}   # (guild, organizer) -> when they last tagged a role
         super().__init__()
 
     async def cog_load(self) -> None:
@@ -161,7 +162,13 @@ class Voyages(commands.GroupCog, group_name="voyage", group_description="Schedul
         mentions = discord.AllowedMentions.none()
         if announce_role and profile is not None and v.ping_role != "off":
             role = await self.game_role(guild, v)
+            # one tagged post per organizer every 15 minutes, as for crew calls (1.4.1): the card still goes up
+            key, now = (guild.id, v.organizer_id), now_utc()
+            last = self.last_ping.get(key)
+            if role is not None and last is not None and now - last < PING_COOLDOWN:
+                role = None
             if role is not None:
+                self.last_ping[key] = now
                 text += "\n" + voice.say("crew_ping", role=role.mention)
                 mentions = discord.AllowedMentions(everyone=False, users=False, roles=[role])
         rsvps = await self.bot.db.rsvps(v.id)

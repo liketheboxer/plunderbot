@@ -14,8 +14,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# yt-dlp[default] brings the scripts it needs for YouTube, and deno runs them
-RUN pip install -r requirements.txt
+# yt-dlp[default] brings the scripts it needs for YouTube, and deno runs them. discord.py 2.7 caps PyNaCl
+# below 1.6, which misses security fixes; 1.6.2 works the same for voice (1.4.1).
+RUN pip install -r requirements.txt \
+    && pip install --no-deps "PyNaCl==1.6.2"
 
 COPY . .
 

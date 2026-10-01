@@ -42,6 +42,7 @@ REPEAT_LABEL = {"off": "Off", "one": "This track", "all": "The whole queue"}
 REPEAT_CHOICES = [app_commands.Choice(name=n, value=v) for v, n in REPEAT_LABEL.items()]
 STEER = ("pause", "resume", "toggle", "skip", "stop", "clear", "remove", "move", "shuffle", "repeat", "seek", "volume")
 QUIET = ("pause", "resume", "toggle")       # answered just to whoever asked; the rest are said for the channel
+MAX_PER_MEMBER = 50               # tracks one member may have waiting (mods and Daisho crew: no limit)
 SNAP_QUEUE = 100                  # tracks sent to the Jukebox screen
 
 
@@ -108,6 +109,7 @@ class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.players: dict[int, Player] = {}
+        self._background: set[asyncio.Task] = set()
         self.resolver = Resolver(MusicConfig.from_env())
 
     async def cog_load(self) -> None:
@@ -234,12 +236,17 @@ class Music(commands.Cog):
             return False, voice.say("music_cant_join"), False
         if len(p.queue.tracks) >= MAX_QUEUE:
             return False, voice.say("music_queue_full"), False
+        theirs = sum(1 for t in p.queue.tracks if t.requester_id == member.id)
+        share = MAX_QUEUE if (crew or _is_mod(member)) else MAX_PER_MEMBER
+        if theirs >= share:      # one member can't fill the whole queue (1.4.1)
+            return False, voice.say("music_your_share", count=MAX_PER_MEMBER), False
         if on_resolving is not None:
             await on_resolving()
         try:
             tracks, name = await self.resolver.resolve(query, member.id)
         except ResolveError as e:
             return False, f"{voice.cuss(None)} {e}", False
+        tracks = tracks[:share - theirs]
         try:
             if vc is None:
                 vc = await target.connect(self_deaf=True, timeout=20)
@@ -248,6 +255,15 @@ class Music(commands.Cog):
         except (discord.ClientException, asyncio.TimeoutError, discord.HTTPException) as e:
             log.warning("Couldn't join voice channel %s: %s", target.id, e)
             return False, voice.say("music_cant_join"), False
+        # the lookup and joining took a while: count again now (other songs may have been queued meanwhile,
+        # or the music stopped and the old player is gone), with no more waiting before the songs go in
+        p = self.player(guild.id, s.music_volume)
+        room = min(share - sum(1 for t in p.queue.tracks if t.requester_id == member.id),
+                   MAX_QUEUE - len(p.queue.tracks))
+        if room <= 0:
+            return False, voice.say("music_your_share" if len(p.queue.tracks) < MAX_QUEUE else "music_queue_full",
+                                    count=MAX_PER_MEMBER), False
+        tracks = tracks[:room]
         p.stopping = False
         p.idle_since = None
         music_channel = guild.get_channel(s.music_channel_id) if s.music_channel_id else None
@@ -478,6 +494,7 @@ class Music(commands.Cog):
         if action not in STEER:
             return False, f"I don't know how to {action} the music."
         p, vc = self.players.get(guild.id), guild.voice_client
+        asked = position
         if action == "toggle":
             action = "resume" if vc is not None and vc.is_paused() else "pause"
         track = None
@@ -514,10 +531,12 @@ class Music(commands.Cog):
             await self.refresh_np(p)
             return True, f"Cleared {n} track{'s' if n != 1 else ''} from the queue."
         if action == "remove":
-            if track is None:
-                return False, ("That track has already left the queue." if url
-                               else f"There's no number {position} in the queue.")
-            p.queue.remove(position)
+            # the queue may have moved on while the check above waited: find the very same track again
+            at = next((i for i, t in enumerate(p.queue.tracks, 1) if t is track), None) if track else None
+            if at is None:
+                return False, ("That track has already left the queue." if url or track
+                               else f"There's no number {asked} in the queue.")
+            p.queue.remove(at)
             await self.refresh_np(p)
             return True, f"Took **{track.title}** out of the queue."
         if action == "move":
@@ -525,7 +544,7 @@ class Music(commands.Cog):
             t = p.queue.move(src, to or 1) if src else None
             if t is None:
                 return False, ("That track has already left the queue." if url
-                               else f"There's no number {position} in the queue.")
+                               else f"There's no number {asked} in the queue.")
             await self.refresh_np(p)
             return True, f"Moved **{t.title}** to number {min(to or 1, len(p.queue.tracks))}."
         if action == "shuffle":

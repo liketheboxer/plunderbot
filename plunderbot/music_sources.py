@@ -23,6 +23,7 @@ from pathlib import Path
 
 import aiohttp
 
+from .netguard import public_url
 from .music_logic import MAX_PLAYLIST, MAX_TRACK_SECONDS, Track, is_url, is_youtube, source_of, spotify_link
 
 log = logging.getLogger("plunderbot.music")
@@ -30,6 +31,10 @@ log = logging.getLogger("plunderbot.music")
 COOKIE_PATH = Path("/tmp/plunderbot-youtube-cookies.txt")
 LRCLIB = "https://lrclib.net/api/search"
 USER_AGENT = "PlunderBot (Brimstone Hill Fortress Discord bot)"
+
+
+NOT_PUBLIC = "I can only play links from the public internet."
+YOUTUBE_OFF = "YouTube is switched off here. Try a SoundCloud, Bandcamp or Twitch link, or a song name."
 
 
 class ResolveError(Exception):
@@ -75,8 +80,13 @@ def write_cookies(b64: str | None, path: Path = COOKIE_PATH) -> Path | None:
     if "youtube.com" not in text:
         log.warning("YOUTUBE_COOKIES has no youtube.com cookies; YouTube plays without them")
         return None
-    path.write_text(text if text.endswith("\n") else text + "\n")
-    os.chmod(path, 0o600)
+    try:      # created private from the start (1.4.1), not chmodded afterwards
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text if text.endswith("\n") else text + "\n")
     return path
 
 
@@ -163,8 +173,10 @@ class Resolver:
         if sp:
             return await self._spotify(sp[0], sp[1], requester)
         if is_url(query):
+            if not public_url(query):
+                raise ResolveError(NOT_PUBLIC)
             if is_youtube(query) and not self.cfg.youtube:
-                raise ResolveError("YouTube is switched off here. Try a SoundCloud, Bandcamp or Twitch link, or a song name.")
+                raise ResolveError(YOUTUBE_OFF)
             return await asyncio.to_thread(self._link, query, requester)
         return await asyncio.to_thread(self._search, query, requester), None
 
@@ -180,13 +192,16 @@ class Resolver:
         if info.get("_type") == "playlist" or info.get("entries") is not None:
             tracks = [t for t in (_entry_to_track(e, requester, info.get("extractor_key"))
                                   for e in list(info.get("entries") or [])[:MAX_PLAYLIST] if e) if t]
-            tracks = [t for t in tracks if self.cfg.youtube or t.source != "youtube"]
+            tracks = [t for t in tracks if (self.cfg.youtube or t.source != "youtube") and public_url(t.url)
+                      and not (t.duration and t.duration > MAX_TRACK_SECONDS)]
             if not tracks:
                 raise ResolveError("That playlist is empty (or everything in it is off limits).")
             return tracks, info.get("title") or "a playlist"
         track = _entry_to_track(info, requester, info.get("extractor_key"))
         if track is None:
             raise ResolveError("I couldn't find anything to play there.")
+        if track.source == "youtube" and not self.cfg.youtube:   # youtube-nocookie.com and the like (1.4.1)
+            raise ResolveError(YOUTUBE_OFF)
         self._check_length(track)
         return [track], None
 
@@ -232,8 +247,13 @@ class Resolver:
             raise ResolveError("I couldn't get that one to play.")
         if track.search and not self.cfg.youtube and source_of(info.get("webpage_url") or "") == "youtube":
             raise ResolveError("YouTube is switched off here.")
+        if not public_url(str(info["url"])):      # never a file:// path or our own network (1.4.1)
+            log.warning("Refused a stream address that isn't on the public internet for %s", track.url)
+            raise ResolveError(NOT_PUBLIC)
         live = info.get("is_live") or info.get("live_status") == "is_live"
         duration = None if live or info.get("duration") is None else int(info["duration"])
+        if duration and duration > MAX_TRACK_SECONDS:
+            raise ResolveError(f"That one's over {MAX_TRACK_SECONDS // 3600} hours long.")
         return Stream(url=info["url"], headers=dict(info.get("http_headers") or {}), duration=duration,
                       title=info.get("title") or track.title)
 

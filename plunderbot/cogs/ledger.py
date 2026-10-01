@@ -10,6 +10,8 @@ monthly budget.
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -338,7 +340,7 @@ class ShipLedger(commands.Cog):
 
         haul, line, notes = None, "ledger_manual", None
         if screenshot is not None:
-            haul, line, error = await self.read(guild.id, screenshot)
+            haul, line, error = await self.read(guild.id, screenshot, user.id)
             if error:  # a picture that wouldn't open
                 return voice.say(line, error=error), None, None
         entry = await db.create_log(
@@ -352,8 +354,9 @@ class ShipLedger(commands.Cog):
         return (voice.say(line), render_log(entry, ship=found, crew=chosen, pending=True, notes=notes),
                 reading_view(entry))
 
-    async def read(self, guild_id: int, screenshot):
-        """(haul or None, the voice line to show, why the picture wouldn't open or None)."""
+    async def read(self, guild_id: int, screenshot, user_id: int | None = None):
+        """(haul or None, the voice line to show, why the picture wouldn't open or None). Each read counts
+        against the member's daily Parley replies (1.4.1), so screenshots can't drain the month's budget."""
         claude = self.claude
         if claude is None:
             return None, "ledger_read_failed", None
@@ -363,10 +366,15 @@ class ShipLedger(commands.Cog):
         spent, _ = await self.bot.db.parley_spend(guild_id, month)
         if spent >= s.parley_budget_cents / 100:
             return None, "ledger_no_budget", None
+        if user_id is not None:
+            day = parley.today(s)[0] if parley else datetime.now(timezone.utc).date().isoformat()
+            if await self.bot.db.parley_replies(guild_id, user_id, day) >= s.parley_daily:
+                return None, "ledger_tired", None
+            await self.bot.db.add_parley_reply(guild_id, user_id, day)
         try:
             if (screenshot.size or 0) > MAX_UPLOAD:
                 raise images.ImageError("over 25 MB")
-            media_type, b64 = prepare_image(await screenshot.read())
+            media_type, b64 = await asyncio.to_thread(prepare_image, await screenshot.read())
         except (images.ImageError, discord.HTTPException, OSError) as e:
             return None, "ledger_bad_image", images.reason(e).rstrip(".")
         try:
