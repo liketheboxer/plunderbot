@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.3 (2026-10-01): Parley shows what it really did
+
+- "Mark me as a maybe for community night again" got "Marked you back down as a maybe", but the card still said Aboard. Parley had answered from memory of doing it earlier in the chat and **called no tool**, so nothing changed. Now:
+  - **Receipts:** under any reply where something was changed, PlunderBot adds small print of what was really done, taken from its records after the change (for an answer, the answer the voyage now has for you: `✅ Maybe for Sea of Thieves - Brimstone Community Night! (#12)`). A reply that claims more than its receipts shows it at a glance.
+  - **A claim gets checked:** a reply that says something was done ("marked", "all set", "cancelled", "queued"...) with no action tool called is sent back once, asking for the tool call or a plain correction.
+  - The rules already said a tool's answer decides; voyage answers now also state the member's answer after the change.
+- Every Parley action is written to PlunderBot's log (what was asked, for whom, and the result), so a reply can be checked against what happened.
+- Daisho's settings screen: a setting saved from the screen shows there straight away, even if a follow-up step trips (picking up members already wearing Pending when Gangplank is turned on, or the Crow's Nest's first look); that step is now a note, and the Gangplank one retries within a minute.
+
 ## 1.6.2 (2026-10-01): Parley names voyages instead of guessing numbers
 
 - After "mark me Aboard for Community Night" worked, "mark me back to a maybe" went to a **guessed voyage number**: Parley doesn't remember the numbers it looked up in an earlier reply, picked an old voyage that had already sailed, and said Community Night had sailed. The voyage tool now takes the voyage by **name** (words from its title, filler like "voyage" or "the" ignored), and a name always wins over a number.

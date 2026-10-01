@@ -26,6 +26,29 @@ from ..parley_actions import ACTION_NAMES, ACTION_TOOLS, Pending, Turn, act
 from ..voyage_logic import zone_from_name, zone_label
 
 log = logging.getLogger("plunderbot.parley")
+# Words that say something was changed. A reply using them with no action tool called is checked (1.6.3).
+CLAIM = re.compile(r"\b(marked|you'?re (now )?(down|aboard|on|set|all set|signed)|all set|i'?ve (set|put|added|moved|"
+                   r"changed|cancell?ed|signed|queued|skipped|registered|renamed|followed|saved|updated|removed)|"
+                   r"(set|put|signed) you|cancell?ed|queued|skipped|registered|retired|renamed|now following|"
+                   r"now wearing|done[!.]|sorted[!.])", re.I)
+NUDGE = ("(Check from PlunderBot, not the member.) Your reply says something was done, but you called no tool in "
+         "this reply, so nothing has changed: what you did earlier in the chat doesn't carry over. If they asked "
+         "for a change, call the tool now. If you only meant to describe what's already so, look it up with a "
+         "tool, or say plainly that you haven't changed anything.")
+
+
+def with_receipts(text: str, done: list[str]) -> str:
+    """The reply, with what was really done underneath in small print (1.6.3), from the records rather than
+    from Claude's wording, so a reply that claims more than happened shows it. Always fits in a message."""
+    if not done:
+        return safe(text)
+    foot = "\n" + "\n".join(f"-# ✅ {d}" for d in done[:5])
+    foot = safe(foot)[:600]
+    body = safe(text)
+    room = 1900 - len(foot)
+    if len(body) > room:
+        body = body[:max(0, room - 1)].rsplit(" ", 1)[0] + "…"
+    return body + foot
 FILLER = {"the", "a", "an", "voyage", "voyages", "upcoming", "next", "one", "for", "to", "on", "my", "our",
           "that", "this", "event", "session", "please"}
 
@@ -201,12 +224,12 @@ class Parley(commands.Cog):
             text = await self.converse(guild, s, system, messages, day, month, author, message.channel, turn)
         view = confirm_view(self.hold(turn.pending))
         extra = {"view": view} if view else {}
+        text = with_receipts(text or voice.say("parley_error"), turn.done)
         try:
-            await message.reply(safe(text) or voice.say("parley_error"), mention_author=False,
-                                allowed_mentions=discord.AllowedMentions.none(), **extra)
+            await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none(), **extra)
         except discord.NotFound:       # they deleted the question: answer in the channel, saying whom to
-            await message.channel.send(f"<@{author.id}> " + (safe(text) or voice.say("parley_error")),
-                                       allowed_mentions=discord.AllowedMentions.none(), **extra)
+            await message.channel.send(f"<@{author.id}> " + text, allowed_mentions=discord.AllowedMentions.none(),
+                                       **extra)
 
     # ------------------------------------------------------------ Confirm buttons (1.6.0)
     def spawn(self, coro) -> None:
@@ -276,7 +299,15 @@ class Parley(commands.Cog):
                                                    usage.get("output_tokens", 0))
             content = resp.get("content") or []
             if resp.get("stop_reason") != "tool_use":
-                return reply_text(content)
+                text = reply_text(content)
+                if turn is not None and not turn.acted and not turn.nudged and not last and CLAIM.search(text):
+                    # 1.6.3: it said it did something, but called no tool in this answer, so nothing changed
+                    # (it remembers doing it earlier in the chat). Ask once for the tool call, or a correction.
+                    turn.nudged = True
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": NUDGE})
+                    continue
+                return text
             messages.append({"role": "assistant", "content": content})
             results = []
             for block in content:

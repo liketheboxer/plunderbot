@@ -450,3 +450,41 @@ async def test_naming_a_voyage_beats_a_guessed_number(env, monkeypatch):
     out = await act(bot, guild, boxer, here, "voyage", {"action": "edit", "name": "community night ii", "seats": 3})
     assert (next(v for v in await bot.db.voyages_with_status("scheduled", guild_id=10)
                  if v.title == "Community Night II")).capacity == 3, out
+
+
+async def test_a_claim_without_a_tool_call_is_checked_and_receipts_come_from_the_records(env, monkeypatch):
+    """1.6.3: "marked you back down as a maybe" with no tool called changed nothing (it remembered doing it
+    earlier in the chat). Such a reply gets one nudge to call the tool, and what was really done is shown
+    under the reply from the records."""
+    from tests.test_parley import FakeClaude, said, tool_call
+    from plunderbot.cogs.parley import NUDGE, with_receipts
+    bot, guild, here = await _setup(env, monkeypatch)
+    boxer = who(1)
+    today = datetime.now(timezone.utc).date()
+    await act(bot, guild, boxer, here, "voyage", {"action": "plan", "title": "Brimstone Community Night", "game": "SoT",
+                                                  "date": (today + timedelta(days=30)).strftime("%m/%d/%Y"),
+                                                  "time": "2pm"})
+    v = (await bot.db.voyages_with_status("scheduled", guild_id=10))[0]
+    parley = bot.get_cog("Parley")
+    s = await bot.db.get_settings(10)
+    parley.claude = FakeClaude([said("No worries, Admiral! Marked you back down as a maybe."),
+                                tool_call("voyage", {"action": "answer", "name": "community night", "answer": "maybe"}),
+                                said("Now you're a maybe for real!")])
+    turn = Turn()
+    text = await parley.converse(guild, s, ["rules", "moment"], [{"role": "user", "content": "Boxer: maybe again"}],
+                                 today.isoformat(), today.strftime("%Y-%m"), boxer, here, turn)
+    assert parley.claude.calls[1]["messages"][-1]["content"] == NUDGE
+    assert 1 in (await bot.db.rsvps(v.id)).maybe and text == "Now you're a maybe for real!"
+    assert turn.done == [f"Maybe for Brimstone Community Night (#{v.id})"]
+    out = with_receipts(text, turn.done)
+    assert out.endswith(f"-# ✅ Maybe for Brimstone Community Night (#{v.id})")
+    # only one nudge, and none when a tool was called or nothing is claimed
+    parley.claude = FakeClaude([said("All set!"), said("Sorry, I haven't changed anything.")])
+    turn = Turn()
+    assert await parley.converse(guild, s, ["r", "m"], [{"role": "user", "content": "x"}], "d", "m", boxer, here,
+                                 turn) == "Sorry, I haven't changed anything."
+    parley.claude = FakeClaude([said("Ahoy! How can I help?")])
+    assert await parley.converse(guild, s, ["r", "m"], [{"role": "user", "content": "hi"}], "d", "m", boxer, here,
+                                 Turn()) == "Ahoy! How can I help?" and len(parley.claude.calls) == 1
+    assert with_receipts("x" * 3000, ["Aboard for A (#1)"]).endswith("-# ✅ Aboard for A (#1)")
+    assert len(with_receipts("x" * 3000, ["Aboard for A (#1)"])) <= 2000

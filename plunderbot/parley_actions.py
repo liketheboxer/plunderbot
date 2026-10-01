@@ -12,6 +12,7 @@ asked can press (see CONFIRM and cogs/parley.py). Lyrics stay with /music lyrics
 """
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 import time
@@ -142,6 +143,12 @@ ACTION_TOOLS = [
 ]
 ACTION_NAMES = {t["name"] for t in ACTION_TOOLS}
 CONFIRM = {("voyage", "cancel"), ("ship", "retire")}   # asked about with buttons first
+ANSWER_LABEL = {"aboard": "Aboard", "maybe": "Maybe", "cant": "Can't make it", "waitlist": "Waitlist (Aboard when a seat opens)"}
+
+
+def voice_date(m: int, d: int) -> str:
+    from . import voice
+    return voice.format_date(m, d)
 
 
 @dataclass
@@ -158,9 +165,17 @@ class Pending:
 
 @dataclass
 class Turn:
-    """What one Parley answer collected along the way: actions waiting on Confirm, and background work."""
+    """What one Parley answer collected along the way: actions waiting on Confirm, background work, and
+    (1.6.3) receipts of what was really done, shown under the reply from the records, not from Claude."""
     pending: list[Pending] = field(default_factory=list)
     spawn: object = None   # callable(coroutine) for work that shouldn't hold up the reply
+    done: list[str] = field(default_factory=list)
+    acted: bool = False    # an action tool was called in this answer
+    nudged: bool = False   # Claude was asked once to back up a claim with a tool call
+
+    def receipt(self, text: str) -> None:
+        if text and text not in self.done:
+            self.done.append(text[:150])
 
 
 def find_game(text: str | None, crew_call: bool = False):
@@ -251,12 +266,19 @@ async def act(bot, guild: discord.Guild, author, channel, name: str, args: dict,
     if handler is None:
         return f"Unknown action {name}."
     action = str((args or {}).get("action") or "")
+    turn = turn if turn is not None else Turn()
+    turn.acted = True
     try:
         if not confirmed and ((name, action) in CONFIRM or await _skips_this_one(bot, guild, args or {}, name)):
-            return await _ask_first(bot, guild, author, name, args or {}, turn)
-        return await handler(bot, guild, author, channel, s, args or {}, turn or Turn())
+            out = await _ask_first(bot, guild, author, name, args or {}, turn)
+        else:
+            out = await handler(bot, guild, author, channel, s, args or {}, turn)
     except (ValueError, TypeError) as e:
-        return f"That didn't work: {e}"
+        out = f"That didn't work: {e}"
+    # every action in the log (1.6.3), so "it said it did it" can be checked against what happened
+    log.info("Parley %s %s for %s in %s%s: %s", name, json.dumps(args or {}, default=str)[:300],
+             getattr(author, "id", "?"), guild.id, " (confirmed)" if confirmed else "", out[:200].replace("\n", " "))
+    return out
 
 
 async def _skips_this_one(bot, guild, a: dict, name: str) -> bool:
@@ -360,7 +382,10 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         return "Voyages are switched off."
     action = a.get("action")
     if action == "plan":
-        return await _plan_voyage(bot, cog, guild, author, channel, s, a)
+        out = await _plan_voyage(bot, cog, guild, author, channel, s, a)
+        if out.startswith("Planned voyage #"):
+            turn.receipt(out.split(" at <t:")[0].replace("Planned voyage", "Planned"))
+        return out
     if action == "answer":
         answer = a.get("answer")
         if answer not in ("aboard", "maybe", "cant", "clear"):
@@ -369,7 +394,11 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         if problem:
             return problem
         ok, reply = await cog.rsvp_as(guild, v.id, author.id, None if answer == "clear" else answer)
-        return f"Voyage {_label(v)}: {reply}" if ok else f"Voyage {_label(v)} has just started or ended."
+        if not ok:
+            return f"Voyage {_label(v)} has just started or ended."
+        now = (await bot.db.rsvps(v.id)).of(author.id)     # what the records say now, not what was asked
+        turn.receipt(f"{ANSWER_LABEL.get(now, 'No answer')} for {v.title} (#{v.id})")
+        return f"Voyage {_label(v)}: {reply} Their answer is now: {ANSWER_LABEL.get(now, 'none')}."
     if action == "series":
         v, problem = await _find_voyage(bot, guild, a)
         if problem:
@@ -384,6 +413,7 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         whole = bool(a.get("whole_series")) and v.repeat != "none"
         if not await cog.apply_cancel(guild, v.id, whole):
             return "It has already started or ended."
+        turn.receipt(f"Cancelled {'the series ' if whole else ''}{v.title} (#{v.id})")
         return (f"Cancelled {'the whole series of ' if whole else ''}\"{v.title}\"; everyone who signed up was told."
                 + (" The next one in the series is still on." if v.repeat != "none" and not whole else ""))
     from .cogs.voyages import EditRefused
@@ -410,6 +440,8 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
     v2 = await cog.apply_series(guild, v, changes, skip_this)
     if v2 is None:
         return "It has already started."
+    turn.receipt(f"{'Skipped a date of' if action == 'skip_date' else 'Put a date back on' if action == 'restore_date' else 'Changed'} "
+                 f"{v2.title} (#{v2.id})")
     return await cog.edit_text(v2, changes, skip_this, tz, whose, starts)
 
 
@@ -498,6 +530,7 @@ async def _crew(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
             return "PlunderBot couldn't post the crew card."
         if profile.open_ended or crew.full:
             await cog.sail(guild, crew.id)
+        turn.receipt(f"Called crew #{crew.id} ({profile.name} {size.label})")
         link = f"https://discord.com/channels/{crew.guild_id}/{crew.channel_id}/{crew.message_id}"
         return (f"Called crew #{crew.id}: {profile.name} {size.label}{f' on {ship.name}' if ship else ''}, with them "
                 f"as captain. The card is up at {link}; the game's ping role was tagged.")
@@ -506,15 +539,20 @@ async def _crew(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         if crew is None or crew.guild_id != guild.id or not _public(guild, crew.channel_id):
             return "There's no crew with that number; check open_crews."
         _, reply = await cog.join_leave_as(guild, crew.id, author.id, action)
+        aboard = author.id in ((await bot.db.get_crew(crew.id)).members or [])
+        turn.receipt(f"{'Aboard' if aboard else 'Not aboard'} crew #{crew.id}")
         return reply
     if action == "close":
         crew = await bot.db.active_crew_led_by(guild.id, author.id)
         if crew is None:
             return "They aren't captaining a crew."
         await cog.end(guild, crew.id, "closed")
+        turn.receipt(f"Closed crew #{crew.id}")
         return "Closed their crew, and its voice channel."
     if action == "rename":
-        _, reply = await cog.rename_as(guild, author, a.get("name") or None)
+        ok, reply = await cog.rename_as(guild, author, a.get("name") or None)
+        if ok:
+            turn.receipt("Renamed their crew")
         return reply
     return f"I don't know how to {action} a crew."
 
@@ -534,6 +572,8 @@ async def _music(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         ok, text, start = await music.enqueue(guild, author, channel, query, bool(a.get("next")))
         if ok and start and turn.spawn is not None:   # start playing without holding up the reply
             turn.spawn(music.advance(guild, music.players[guild.id]))
+        if ok:
+            turn.receipt(f"Queued: {query[:80]}")
         return ("Done: " if ok else "It didn't work: ") + text
     from .music_logic import parse_position
     kw: dict = {}
@@ -557,6 +597,8 @@ async def _music(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         else:
             return "How loud? Give a percent or a change."
     ok, text = await music.control(guild, author, action, **kw)
+    if ok:
+        turn.receipt(f"Music: {action}" + (f" {kw['percent']}%" if action == "volume" else ""))
     return ("Done: " if ok else "It didn't work: ") + text
 
 
@@ -570,10 +612,16 @@ async def _me(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         if action == "timezone_set":
             if not a.get("zone"):
                 return "Which time zone? Ask them."
-            return await core.tz_set_as(author, str(a["zone"])[:60])
+            out = await core.tz_set_as(author, str(a["zone"])[:60])
+            saved = await bot.db.member_timezone(author.id)
+            if saved:
+                turn.receipt(f"Time zone: {saved}")
+            return out
         if action == "timezone_show":
             return await core.tz_show_as(author, guild.id)
-        return await core.tz_clear_as(author)
+        out = await core.tz_clear_as(author)
+        turn.receipt("Time zone cleared")
+        return out
     cog = bot.get_cog("Birthdays")
     if cog is None:
         return "Birthdays are switched off."
@@ -581,11 +629,18 @@ async def _me(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         m, d = a.get("month"), a.get("day")
         if not isinstance(m, int) or not isinstance(d, int) or not 1 <= m <= 12 or not 1 <= d <= 31:
             return "It needs a month (1 to 12) and a day; ask them (never the year)."
-        return await cog.set_as(guild.id, author.id, m, d)
+        out = await cog.set_as(guild.id, author.id, m, d)
+        saved = await bot.db.get_birthday(guild.id, author.id)
+        if saved == (m, d):
+            turn.receipt(f"Birthday: {voice_date(m, d)}")
+        return out
     if action == "birthday_show":
         return await cog.mine_as(guild.id, author.id)
     if action == "birthday_remove":
-        return await cog.remove_as(guild.id, author.id)
+        out = await cog.remove_as(guild.id, author.id)
+        if await bot.db.get_birthday(guild.id, author.id) is None:
+            turn.receipt("Birthday removed")
+        return out
     return f"I don't know how to {action}."
 
 
@@ -620,7 +675,10 @@ async def _follow(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         return "Which games? Ask them."
     keys = {e["key"] for e in mine}
     keys = keys | {e["key"] for e in picked} if action == "follow" else keys - {e["key"] for e in picked}
-    _, text = await board.follow_as(guild, author, sorted(keys))
+    changed, text = await board.follow_as(guild, author, sorted(keys))
+    if changed:
+        turn.receipt(f"{'Following' if action == 'follow' else 'Stopped following'} "
+                     + ", ".join(e["name"] for e in picked))
     return text
 
 
@@ -663,7 +721,9 @@ async def _roles(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
             chosen = list(these)[:1] if m.mode == "single" else list(mine | these)
         else:
             chosen = list(mine - these)
-        _, text, zones = await cog.apply_as(guild, author, m, chosen)
+        changed, text, zones = await cog.apply_as(guild, author, m, chosen)
+        if changed:
+            turn.receipt(f"Roles from {m.title} updated")
         if zones:
             text += (" That region spans several time zones: ask which is closest ("
                      + ", ".join(label for label, _ in zones) + ") and set it with me/timezone_set.")
@@ -695,14 +755,20 @@ async def _ship(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
     if action == "register":
         if not a.get("name") or not a.get("kind"):
             return "It needs her name and whether she's a Sloop, Brigantine or Galleon; ask them."
-        _, text = await ledger.register_as(guild.id, author.id, str(a["name"]), str(a["kind"]), a.get("motto"))
+        ok, text = await ledger.register_as(guild.id, author.id, str(a["name"]), str(a["kind"]), a.get("motto"))
+        if ok:
+            turn.receipt(f"Registered {a['name']}")
         return text
     if action == "edit":
-        _, text = await ledger.edit_as(guild.id, author, a.get("ship"), name=a.get("name"), kind=a.get("kind"),
-                                       motto=a.get("motto"), own_only=True)
+        ok, text = await ledger.edit_as(guild.id, author, a.get("ship"), name=a.get("name"), kind=a.get("kind"),
+                                        motto=a.get("motto"), own_only=True)
+        if ok:
+            turn.receipt("Ship updated")
         return text
     if action == "retire":
-        _, text = await ledger.retire_as(guild.id, author, a.get("ship"), own_only=True)
+        ok, text = await ledger.retire_as(guild.id, author, a.get("ship"), own_only=True)
+        if ok:
+            turn.receipt("Ship retired")
         return text
     return f"I don't know how to {action} a ship."
 
@@ -714,7 +780,9 @@ async def _pirate(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
     if a.get("action") == "set":
         if a.get("gamertag") is None and a.get("motto") is None:
             return "Set what? A gamertag, a motto or both."
-        return await ledger.pirate_set_as(guild.id, author.id, a.get("gamertag"), a.get("motto"))
+        out = await ledger.pirate_set_as(guild.id, author.id, a.get("gamertag"), a.get("motto"))
+        turn.receipt("Pirate profile saved")
+        return out
     who = author
     wanted = str(a.get("member") or "").strip()
     if wanted:

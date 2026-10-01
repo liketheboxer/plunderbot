@@ -519,15 +519,25 @@ class Daisho(commands.Cog):
         if values.get("parley_enabled") and not self.bot.config.anthropic_api_key:
             raise ApplyError("Parley needs the ANTHROPIC_API_KEY secret on the unit first.")
         s = await self.bot.db.update_settings(guild.id, **values)
+        self.mark("settings", "guild")   # saved: the screen shows it even if a follow-up step below trips (1.6.3)
         if values.get("gangplank_enabled") and not before.gangplank_enabled:
             cog = self.bot.get_cog("Gangplank")
-            found = await cog.catch_up(guild, s, discord.utils.utcnow()) if cog else 0
-            notes.append(f"Gangplank is on; {found} member(s) wearing Pending are now tracked.")
+            try:
+                found = await cog.catch_up(guild, s, discord.utils.utcnow()) if cog else 0
+                notes.append(f"Gangplank is on; {found} member(s) wearing Pending are now tracked.")
+            except Exception as e:   # it's on either way; the next minute's tick catches up again
+                log.warning("Gangplank catch-up after turning it on failed: %r", e)
+                notes.append("Gangplank is on. Picking up members already wearing Pending didn't finish "
+                             f"({type(e).__name__}); it tries again within a minute.")
         if values.get("crowsnest_enabled") and not before.crowsnest_enabled:
             cog = self.bot.get_cog("CrowsNest")
-            if cog is not None:
-                await cog.check(guild)
-            notes.append("The Crow's Nest is on; what's already out was noted, not posted.")
+            try:
+                if cog is not None:
+                    await cog.check(guild)
+                notes.append("The Crow's Nest is on; what's already out was noted, not posted.")
+            except Exception as e:
+                log.warning("Crow's Nest first look after turning it on failed: %r", e)
+                notes.append(f"The Crow's Nest is on; its first look didn't finish ({type(e).__name__}).")
         if "timezone" in values and values["timezone"] != before.timezone:
             await self._reschedule_articles(guild)
         self.mark("settings", "guild")
