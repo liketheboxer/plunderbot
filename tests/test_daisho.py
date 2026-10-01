@@ -143,7 +143,8 @@ async def test_snapshots_go_out_once_then_only_when_changed(env):
     await bot.db.update_settings(10, crew_channel_id=20, timezone="America/Los_Angeles")
     await cog.run_once(guild, now=0)
     sent = cog.client.snapshots[-1]
-    assert set(sent) == {"guild", "settings", "articles", "pages", "voyages", "crews", "ledger", "menus"}
+    assert set(sent) == {"guild", "settings", "articles", "pages", "voyages", "crews", "ledger", "menus", "music"}
+    assert sent["music"]["current"] is None and sent["music"]["queue"] == []
     g = sent["guild"]
     assert {"id": 20, "name": "looking-for-group", "type": "text", "category": None} in g["channels"]
     assert {"id": 7, "name": "◑~ Voice Channels", "type": "category", "category": None} in g["channels"]
@@ -159,7 +160,7 @@ async def test_snapshots_go_out_once_then_only_when_changed(env):
     assert set(cog.client.snapshots[-1]) == {"ledger"}
     assert cog.client.snapshots[-1]["ledger"]["ships"][0]["name"] == "Depth Charge"
     await cog.run_once(guild, now=2000)        # the half-hour pass sends everything
-    assert len(cog.client.snapshots[-1]) == 8
+    assert len(cog.client.snapshots[-1]) == 9
 
 
 async def test_daisho_down_never_stops_the_bot(env):
@@ -529,3 +530,17 @@ def test_is_emoji():
     from plunderbot.menu_logic import is_emoji
     assert is_emoji("🎮") and is_emoji("🇺🇸") and is_emoji("<:Bruh:123456789012345678>") and is_emoji("👍🏽")
     assert not is_emoji("joystick") and not is_emoji("🎮 PC") and not is_emoji("")
+
+
+async def test_checks_in_every_3_seconds_while_the_music_is_on(env):
+    """1.4.0: the Jukebox screen's buttons land in about 3 seconds while PlunderBot is in voice."""
+    bot, cog, guild = env
+    from plunderbot.cogs.daisho import FAST_SECONDS, POLL_SECONDS
+    cog.pace(guild)
+    assert cog.loop.seconds == POLL_SECONDS
+    guild.voice_client = object()
+    cog.pace(guild)
+    assert cog.loop.seconds == FAST_SECONDS
+    guild.voice_client = None
+    cog.pace(guild)
+    assert cog.loop.seconds == POLL_SECONDS

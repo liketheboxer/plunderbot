@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0 (2026-09-30): The Jukebox on the web
+
+Pairs with The Magical Samurai 1.17.0.
+
+- Daisho has a **Jukebox** screen: what's playing (cover art, who asked, how far in, which voice channel and how many listening) and the queue. PlunderBot sends it a `music` snapshot; while a track plays it sends when the track started rather than where it's up to, so nothing is re-sent every second, plus a heartbeat every 30 seconds.
+- Members **add songs** there (`music.add`): with nothing playing, PlunderBot joins the voice channel they're in, and the Now Playing card goes to the music channel, or else that voice channel's own chat.
+- Members **steer** there (`music.control`): pause/play, skip, shuffle, repeat, volume, stop, move a track to the front, remove one, and clear. Same rules as Discord, as the member who pressed it: they must be in PlunderBot's voice channel, and the DJ role applies. Daisho crew with the Voyages permission steer from anywhere and can add to what's playing without being in voice, like a mod. Each queued-track button carries the track's link, so if the queue moved before it arrived, PlunderBot acts on that track wherever it now is, or says it's gone.
+- While PlunderBot is in a voice channel it checks Daisho for changes every **3 seconds** instead of 15.
+- Under the hood: the `/music` commands, the Now Playing buttons and the Jukebox screen now share one `control()` and one `may_steer()` check (no change in how the commands behave).
+- The starter Pirate's Guide's Music section and Parley's command list mention the Jukebox page.
+
 ## 1.3.1 (2026-09-30): Ask PlunderBot to do things
 
 - Parley can now act for the member who asked, in plain speech, through the same code as the commands and buttons: **plan a voyage** ("plan a Sea of Thieves galleon run Friday at 8"), **answer** a voyage (Aboard, Maybe, Can't make it, or take it back), **cancel** a voyage they organized, **call a crew** ("start a sloop for fort"), **join or leave** a crew, and **close** their own crew. It asks when a voyage's date or time is missing, reads times in the member's own time zone (as `/voyage create` does) and says which zone it used. It never acts for anyone else, and members still on the Gangplank can't use it. Voyage and crew lists it reads now carry their numbers (#12) so it can pick the right one.

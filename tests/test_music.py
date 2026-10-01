@@ -216,6 +216,10 @@ class Voice(SimpleNamespace):
     def mention(self):
         return f"<#{self.id}>"
 
+    async def send(self, content=None, **kw):      # a voice channel's own chat
+        self.__dict__.setdefault("sent", []).append(content or kw.get("embed"))
+        return SimpleNamespace(delete=_noop, edit=_anoop)
+
     async def connect(self, **kw):
         vc = FakeVC(self)
         vc.guild = self.guild
@@ -300,7 +304,7 @@ async def music(tmp_path, monkeypatch):
     monkeypatch.setattr(cog.resolver, "resolve", resolve)
     monkeypatch.setattr(cog.resolver, "stream", stream)
     guild = SimpleNamespace(id=10, voice_client=None, me=SimpleNamespace(id=999))
-    vch = Voice(id=50, guild=guild, members=[])
+    vch = Voice(id=50, name="Tavern", guild=guild, members=[])
     txt = Text(id=60, sent=[])
     guild.get_channel = lambda cid: {50: vch, 60: txt}.get(cid)
     monkeypatch.setattr(bot, "get_guild", lambda gid: guild if gid == 10 else None)
@@ -428,3 +432,81 @@ async def test_parley_queues_songs_for_whoever_asked(music):
     assert "Now playing: Alestorm - Keelhauled" in q and "1. Wellerman" in q
     from plunderbot.parley_logic import TOOLS
     assert {"play_music", "music_queue"} <= {t["name"] for t in TOOLS}
+
+
+async def test_jukebox_screen_steers_with_the_same_rules(music):
+    """1.4.0: the Jukebox screen in Daisho adds and steers through the same checks as Discord, and sees the
+    queue in the music snapshot."""
+    from plunderbot.cogs.daisho import ApplyError, Daisho
+    bot, cog, guild, vch, txt = music
+    boxer, twiddles, away, crew = member(1, vch), member(2, vch), member(3, None), member(4, None)
+    people = {m.id: m for m in (boxer, twiddles, away, crew)}
+    guild.get_member = lambda uid: people.get(uid)
+    for m in people.values():
+        m.display_name = f"pirate{m.id}"
+    d = Daisho(bot)
+
+    state = await cog.state(guild)
+    assert state["current"] is None and state["channel"] is None and state["enabled"] is True
+    with pytest.raises(ApplyError, match="voice channel"):         # nothing playing and not in voice
+        await d.apply_music_add(guild, {"member_id": 3, "query": "shanty"})
+    out = await d.apply_music_add(guild, {"member_id": 1, "query": "one"})
+    await settle()
+    p = cog.players[10]
+    assert p.queue.current.title == "one" and "**" not in out
+    assert p.text_channel_id == 50                                 # no channel asked from: the voice chat
+    await d.apply_music_add(guild, {"member_id": 2, "query": "two, three, four"})
+    await d.apply_music_add(guild, {"member_id": 2, "query": "front", "front": True})
+    assert [t.title for t in p.queue.tracks] == ["front", "two", "three", "four"]
+
+    state = await cog.state(guild)
+    assert state["playing"] and state["current"]["title"] == "one" and state["current"]["requester"] == "pirate1"
+    assert state["current"]["started_at"] and state["current"]["position"] is None
+    assert [t["title"] for t in state["queue"]] == ["front", "two", "three", "four"]
+    assert state["channel"] == {"id": "50", "name": "Tavern"}
+    assert set(state["listeners"]) == {"1", "2"}
+
+    # someone not in the voice channel can't steer; crew (Daisho's Voyages permission) can from anywhere
+    with pytest.raises(ApplyError, match="with me"):
+        await d.apply_music_control(guild, {"member_id": 3, "action": "pause"})
+    await d.apply_music_control(guild, {"member_id": 4, "crew": True, "action": "pause"})
+    assert guild.voice_client.is_paused()
+    state = await cog.state(guild)
+    assert state["paused"] and state["current"]["position"] is not None and state["current"]["started_at"] is None
+    await d.apply_music_control(guild, {"member_id": 1, "action": "toggle"})
+    assert guild.voice_client.is_playing()
+    # crew adds to what's playing even out of voice
+    await d.apply_music_add(guild, {"member_id": 4, "crew": True, "query": "crew pick"})
+    assert p.queue.tracks[-1].title == "crew pick"
+
+    # the queue moved on since the page was drawn: the track's link wins over its old number
+    two = p.queue.tracks[1]
+    p.queue.tracks.insert(0, T("sneaked in"))
+    out = await d.apply_music_control(guild, {"member_id": 2, "action": "remove", "position": 2, "url": two.url})
+    assert "two" in out and "two" not in [t.title for t in p.queue.tracks]
+    with pytest.raises(ApplyError, match="already left"):
+        await d.apply_music_control(guild, {"member_id": 2, "action": "remove", "position": 2, "url": two.url})
+    four = next(t for t in p.queue.tracks if t.title == "four")
+    await d.apply_music_control(guild, {"member_id": 1, "action": "move", "position": 9, "to": 1, "url": four.url})
+    assert p.queue.tracks[0].title == "four"
+    await d.apply_music_control(guild, {"member_id": 1, "action": "repeat", "mode": "cycle"})
+    assert p.queue.repeat == "one"
+    await d.apply_music_control(guild, {"member_id": 1, "action": "volume", "percent": 80})
+    assert p.volume == 0.8
+    with pytest.raises(ApplyError, match="1 to 150"):
+        await d.apply_music_control(guild, {"member_id": 1, "action": "volume", "percent": True})
+    with pytest.raises(ApplyError, match="know how"):
+        await d.apply_music_control(guild, {"member_id": 1, "action": "explode"})
+
+    # the DJ role still applies: twiddles can't skip boxer's track
+    await bot.db.update_settings(10, music_dj_role_id=77)
+    with pytest.raises(ApplyError, match="DJs"):
+        await d.apply_music_control(guild, {"member_id": 2, "action": "skip"})
+    await d.apply_music_control(guild, {"member_id": 1, "action": "skip"})
+    await settle()
+    assert p.queue.current.title == "four"
+    with pytest.raises(ApplyError, match="DJs"):                   # stopping is for DJs
+        await d.apply_music_control(guild, {"member_id": 1, "action": "stop"})
+    await d.apply_music_control(guild, {"member_id": 4, "crew": True, "action": "stop"})
+    await settle()
+    assert guild.voice_client is None and (await cog.state(guild))["current"] is None

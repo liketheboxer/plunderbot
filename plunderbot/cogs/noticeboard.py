@@ -56,7 +56,8 @@ STARTER_GUIDE = [
     ("Music",
      "Hop in a voice channel and `/play` a song name or a link, and I'll bring the band. The Now Playing card has "
      "buttons to pause, skip, stop, shuffle and repeat, and `/music queue` shows what's next. Or just @mention me "
-     "and ask for something to play."),
+     "and ask for something to play. The Jukebox page on my website shows the queue too, and you can add songs and "
+     "steer from there."),
     ("Need a hand?",
      "Ask a Harbormaster, or @mention me and ask. Fair winds!"),
 ]

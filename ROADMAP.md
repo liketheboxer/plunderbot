@@ -21,8 +21,9 @@
 | 1.2.0 | Members plan voyages, call crews, answer and join from Daisho, as themselves (with The Magical Samurai 1.15.0; Swabbies came in 1.13.0) |
 | 1.3.0 | The jukebox: `/play`, `/music`, Now Playing card, DJ role, 24/7; YouTube through a throwaway account, Spotify links, SoundCloud, Bandcamp, Twitch, radio (with The Magical Samurai 1.16.0) |
 | 1.3.1 | Ask PlunderBot: Parley plans and answers voyages, calls and joins crews, and queues songs, in plain speech |
+| 1.4.0 | The Jukebox screen in Daisho: the queue live, add songs, and steer by Discord's rules (with The Magical Samurai 1.17.0) |
 
 ## Later
 
-- In Daisho: pictures on pages and articles, the emoji picker, new pages from scratch, ship profiles, and a Now Playing and queue screen for the jukebox.
+- In Daisho: pictures on pages and articles, the emoji picker, new pages from scratch, and ship profiles.
 - Jukebox: saved playlists, and voting to skip.

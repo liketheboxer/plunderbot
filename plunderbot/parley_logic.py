@@ -98,7 +98,7 @@ Following games (ping role + forum thread): /follow, or the Follow games button 
 Ships (Sea of Thieves): /ship register, /ship edit, /ship retire, /ship show (a ship's profile), /ship fleet (richest ships and pirates). Pick your ship in /crew start.
 Logging a voyage's plunder: /ship log with a screenshot of the Captain's Log two-page spread, or just @mention PlunderBot (or reply to it) with the screenshot. PlunderBot reads it; the member presses Confirm or Edit before it's saved.
 Pirate profiles: /pirate profile, /pirate set (gamertag and motto).
-Music in voice channels: /play (a song name or a link), /music queue, /music nowplaying, /music skip, /music pause, /music resume, /music stop, /music shuffle, /music repeat, /music seek, /music volume, /music lyrics. The Now Playing card has buttons too.
+Music in voice channels: /play (a song name or a link), /music queue, /music nowplaying, /music skip, /music pause, /music resume, /music stop, /music shuffle, /music repeat, /music seek, /music volume, /music lyrics. The Now Playing card has buttons too, and the Jukebox screen on PlunderBot's website (Daisho) shows the queue, adds songs and has the same buttons.
 About PlunderBot: /plunderbot.
 Quartermasters manage settings with /admin, /colours (role menus), /noticeboard (pages) and /articles (the server's automatic replies and rules: when someone says a word, joins, gets a role, reacts, or on a schedule)."""
 

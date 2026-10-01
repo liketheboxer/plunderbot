@@ -6,7 +6,9 @@ PlunderBot stays the source of truth. This cog:
   Board pages, voyages, crews and the Ship's Ledger): anything that changed, every five minutes, and
   everything every half hour;
 * every 15 seconds, picks up changes made on the screens, applies them the same way the slash
-  commands do (with the same checks), reports how each went, and re-sends what it touched.
+  commands do (with the same checks), reports how each went, and re-sends what it touched;
+* while PlunderBot is in a voice channel, does all that every 3 seconds instead, and keeps the
+  Jukebox screen's copy of the queue current (1.4.0).
 
 It needs SAMURAI_URL and SAMURAI_MODULE_TOKEN (Exocomp sets both once the Captain has issued the module
 token). Without them it does nothing, and if Daisho is down PlunderBot carries on as normal.
@@ -37,9 +39,11 @@ from ..voyage_logic import REPEATS, ParseError, format_reminders, parse_reminder
 log = logging.getLogger("plunderbot.daisho")
 
 POLL_SECONDS = 15
+FAST_SECONDS = 3        # while the music's on, so the Jukebox screen's buttons land quickly (1.4.0)
+HEARTBEAT = 30          # while a track plays, re-send the music at least this often, so the screen knows it's live
 PUSH_EVERY = 300        # send what changed
 FORCE_EVERY = 1800      # send everything anyway, so Daisho knows we're alive
-SECTIONS = ("guild", "settings", "articles", "pages", "voyages", "crews", "ledger", "menus")
+SECTIONS = ("guild", "settings", "articles", "pages", "voyages", "crews", "ledger", "menus", "music")
 
 
 class ApplyError(Exception):
@@ -87,6 +91,11 @@ def short_reminders(minutes: list[int]) -> str:
         return "none"
     return ", ".join(f"{n // 1440}d" if n % 1440 == 0 else f"{n // 60}h" if n % 60 == 0 else f"{n}m"
                      for n in minutes)
+
+
+def plain(text: str) -> str:
+    """A bot reply as the screens show it: no Discord bold, and channel mentions as names."""
+    return text.replace("**", "")
 
 
 def digest(data) -> str:
@@ -164,6 +173,7 @@ class Daisho(commands.Cog):
             return
         try:
             await self.run_once(guild)
+            self.pace(guild)
             if self.failing:
                 log.info("Daisho is reachable again")
             self.failing = False
@@ -171,6 +181,12 @@ class Daisho(commands.Cog):
             if not self.failing:
                 log.warning("Can't reach Daisho (%s); PlunderBot carries on and keeps trying", e)
             self.failing = True
+
+    def pace(self, guild: discord.Guild) -> None:
+        """Every 3 seconds while PlunderBot is in a voice channel, every 15 otherwise."""
+        want = FAST_SECONDS if getattr(guild, "voice_client", None) is not None else POLL_SECONDS
+        if self.loop.seconds != want:
+            self.loop.change_interval(seconds=want)
 
     @loop.before_loop
     async def _wait_until_ready(self) -> None:
@@ -184,6 +200,8 @@ class Daisho(commands.Cog):
                 log.warning("Skipping a malformed change from Daisho")   # never let one block the rest
                 continue
             await self.handle(guild, change)
+        if self.bot.get_cog("Music") is not None:
+            self.mark("music")      # cheap to build, and only sent when it changed
         force = now - self.last_force >= FORCE_EVERY
         check_all = force or now - self.last_push >= PUSH_EVERY
         if check_all or self.dirty:
@@ -203,6 +221,8 @@ class Daisho(commands.Cog):
                 continue
             data = await self.build(name, guild)
             d = digest(data)
+            if name == "music" and data.get("current"):
+                d += f":{int(time.time() // HEARTBEAT)}"
             if force or self.sent.get(name) != d:
                 out[name] = (data, d)
         if not out:
@@ -373,6 +393,12 @@ class Daisho(commands.Cog):
                         "ended_at": c.ended_at, "channel_id": c.channel_id, "message_id": c.message_id,
                         "haul": {"gold": entry.gold, "doubloons": entry.doubloons} if entry else None})
         return out
+
+    async def snap_music(self, guild):
+        cog = self.bot.get_cog("Music")
+        if cog is None:
+            return {"enabled": False, "loaded": False, "queue": []}
+        return await cog.state(guild)
 
     async def snap_ledger(self, guild):
         db = self.bot.db
@@ -1083,6 +1109,42 @@ class Daisho(commands.Cog):
         return f"Ledger entry #{entry.id} ({entry.gold:,} gold) removed, and its post taken down."
 
 
+    # ------------------------------------------------------------ applying: the jukebox (1.4.0)
+    async def _music(self, guild, p: dict):
+        cog = self.bot.get_cog("Music")
+        if cog is None:
+            raise ApplyError("Music isn't switched on in this PlunderBot.")
+        member = await self.member_of(guild, p)
+        if member is None:
+            raise ApplyError("That change arrived garbled; make it again.")
+        return cog, member, p.get("crew") is True
+
+    async def apply_music_add(self, guild, p: dict) -> str:
+        cog, member, crew = await self._music(guild, p)
+        query = " ".join(str(p.get("query") or "").split())[:300]
+        if not query:
+            raise ApplyError("Say what to play: a song name or a link.")
+        ok, text, start = await cog.enqueue(guild, member, None, query, front=p.get("front") is True, crew=crew)
+        if not ok:
+            raise ApplyError(plain(text))
+        if start:
+            await cog.advance(guild, cog.players[guild.id])
+        return plain(text)
+
+    async def apply_music_control(self, guild, p: dict) -> str:
+        cog, member, crew = await self._music(guild, p)
+        def num(key):
+            v = p.get(key)
+            return v if isinstance(v, int) and not isinstance(v, bool) else None
+        url = p.get("url") if isinstance(p.get("url"), str) else None
+        ok, text = await cog.control(guild, member, str(p.get("action") or ""), crew=crew, position=num("position"),
+                                     to=num("to"), mode=p.get("mode") if isinstance(p.get("mode"), str) else None,
+                                     percent=num("percent"), url=url)
+        if not ok:
+            raise ApplyError(plain(text))
+        return plain(text)
+
+
 HANDLERS = {
     "settings.update": Daisho.apply_settings,
     "article.save": Daisho.apply_article_save,
@@ -1103,6 +1165,8 @@ HANDLERS = {
     "menu.save": Daisho.apply_menu_save,
     "menu.post": Daisho.apply_menu_post,
     "menu.delete": Daisho.apply_menu_delete,
+    "music.add": Daisho.apply_music_add,
+    "music.control": Daisho.apply_music_control,
 }
 
 
