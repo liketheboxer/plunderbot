@@ -30,6 +30,7 @@ COGS = [
     "plunderbot.cogs.articles",
     "plunderbot.cogs.music",
     "plunderbot.cogs.daisho",
+    "plunderbot.cogs.presence",
 ]
 
 
@@ -121,6 +122,12 @@ class PlunderBot(commands.Bot):
     async def close(self) -> None:
         await super().close()
         await self.db.close()
+
+    def presence_changed(self) -> None:
+        """The status under the bot's name may need to change (a song started or stopped, or the setting)."""
+        cog = self.get_cog("Presence")
+        if cog is not None:
+            cog.nudge()
 
     def gauge(self, name: str, value: float) -> None:
         if self.telemetry is not None:

@@ -426,6 +426,13 @@ MIGRATIONS: list[str] = [
     ALTER TABLE voyages ADD COLUMN repeat_until TEXT;
     ALTER TABLE voyages ADD COLUMN skips TEXT NOT NULL DEFAULT '';
     """,
+    # PlunderBot 1.7.0 presence: the status under the bot's name (Daisho or a slash command), and Now Playing while music plays
+    """
+    ALTER TABLE guild_settings ADD COLUMN presence_status TEXT NOT NULL DEFAULT 'online';
+    ALTER TABLE guild_settings ADD COLUMN presence_kind TEXT NOT NULL DEFAULT 'custom';
+    ALTER TABLE guild_settings ADD COLUMN presence_text TEXT;
+    ALTER TABLE guild_settings ADD COLUMN presence_music INTEGER NOT NULL DEFAULT 1;
+    """,
 ]
 
 
@@ -471,6 +478,10 @@ class GuildSettings:
     music_idle_minutes: int = 5
     music_volume: int = 60
     music_stay: int = 0
+    presence_status: str = "online"
+    presence_kind: str = "custom"
+    presence_text: str | None = None
+    presence_music: int = 1
 
 
 @dataclass
@@ -539,7 +550,7 @@ class Boarding:
     reminded_at: str | None = None
 
 
-_SETTING_COLUMNS = {"ledger_reminders", "music_enabled", "music_youtube", "music_dj_role_id", "music_channel_id",
+_SETTING_COLUMNS = {"presence_status", "presence_kind", "presence_text", "presence_music", "ledger_reminders", "music_enabled", "music_youtube", "music_dj_role_id", "music_channel_id",
                     "music_idle_minutes", "music_volume", "music_stay", "parley_enabled", "parley_budget_cents", "parley_daily", "parley_kagi_daily",
                     "shipslog_channel_id", "shipslog_weekday", "shipslog_hour", "shipslog_last",
                     "crowsnest_enabled", "forum_channel_id", "gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",

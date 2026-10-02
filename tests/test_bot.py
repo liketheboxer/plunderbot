@@ -45,7 +45,9 @@ async def test_command_tree(bot):
     admin = top["admin"]
     assert isinstance(admin, app_commands.Group)
     assert admin.guild_only and admin.default_permissions.manage_guild
-    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages", "regions", "gangplank", "shipslog", "crowsnest", "parley", "ledger", "music"}
+    assert {c.name for c in admin.commands} == {"settings", "timezone", "birthdays", "crew", "voyages", "regions", "gangplank", "shipslog", "crowsnest", "parley", "ledger", "music",
+                                                "status"}
+    assert {c.name for c in admin.get_command("status").commands} == {"set", "music", "show"}
     assert {c.name for c in admin.get_command("crew").commands} == {"channel", "category", "cleanup", "expire", "pingrole", "autopings", "emoji"}
     assert {c.name for c in top["crew"].commands} == {"start", "close", "list", "rename"}
     assert {c.name for c in top["music"].commands} == {"queue", "nowplaying", "skip", "pause", "resume", "stop", "clear",

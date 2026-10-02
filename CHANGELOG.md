@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0 (2026-10-01): the status under its name
+
+- **PlunderBot's status in Discord** (the dot and the line under its name) is a setting: the line (up to 128 characters), how Discord words it (just the text, Playing, Listening to, Watching, Competing in) and the dot (Online, Idle, Do Not Disturb, Invisible). Set it on Daisho's Settings screen (**Bot status**) or with `/admin status set`; `/admin status show` says what's showing.
+- **Now Playing:** while the jukebox plays, the line reads `Now Playing: <song>`, and goes back when the music stops. On by default; `/admin status music` or the screen switches it off.
+- Discord limits how often a bot changes its status, so changes are spaced at least 5 seconds apart, and only sent when what shows actually changes.
+
 ## 1.6.3 (2026-10-01): Parley shows what it really did
 
 - "Mark me as a maybe for community night again" got "Marked you back down as a maybe", but the card still said Aboard. Parley had answered from memory of doing it earlier in the chat and **called no tool**, so nothing changed. Now:

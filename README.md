@@ -34,6 +34,7 @@ A Python Discord bot (discord.py 2.x) that runs fenced in under Exocomp and repo
 | `/music stop` | Listeners (DJ) | Stop, clear the queue and leave. Also `leave`, `clear`, `remove`, `move`, `shuffle`, `repeat` (off, this track, the whole queue), `seek` (1:30), `volume` (1 to 150%) |
 | `/admin settings` | Manage Server | Show this server's settings |
 | `/admin timezone` | Manage Server | Server time zone (default America/Los_Angeles) |
+| `/admin status set` | Manage Server | The line under PlunderBot's name, how it's worded (Playing, Listening to...) and its dot. Also `music` (Now Playing: song while the jukebox plays; on by default) and `show` |
 | `/follow` | Everyone | Pick the games you follow: their ping roles, plus their threads in the game forum |
 | `/colours create` | Manage Roles | Role menus: `create`, `add` (role, emoji, label, description), `remove`, `move`, `edit`, `onboarding` (offer it to newcomers), `post`, `preview`, `import` (copy a MEE6 reaction-role message), `list`, `delete` |
 | `/noticeboard create` | Manage Server | Pages: `create`, `section add/edit/image/remove/move` (a pop-up form), `import` (copy an existing message, or a run of them with `through`, such as the welcome and rules), `starter` (a draft Pirate's Guide), `post`, `preview`, `gameindex`, `list`, `delete` |
