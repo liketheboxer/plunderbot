@@ -23,7 +23,8 @@ import discord
 
 from . import games
 from .crew_logic import clean_title, now_utc
-from .voyage_logic import (ParseError, format_reminders, is_weekday_name, parse_date, parse_reminders, parse_time,
+from .voyage_logic import (ParseError, format_lobby, format_reminders, format_repost, is_weekday_name, lobby_for,
+                           parse_date, parse_lobby, parse_reminders, parse_repost, parse_time, repost_for,
                            resolve_repeat, split_zone, to_utc, zone_label)
 
 log = logging.getLogger("plunderbot.parley")
@@ -34,9 +35,13 @@ REPEAT_HELP = ("'none', 'weekly', 'biweekly', 'every 3 weeks' (up to the limit),
 
 ACTION_TOOLS = [
     {"name": "voyage",
-     "description": "Scheduled voyages (planned sessions people sign up for), as the person asking. action: "
-                    "'plan' a new one with them as organizer (needs title, date and time; make a short title up "
-                    "if they didn't give one, but ask for a missing date or time instead of guessing); 'answer' "
+     "description": "Scheduled voyages (planned sessions people sign up for; 'event' means the same), as the "
+                    "person asking. action: 'plan' a new one with them as organizer (needs title, date and time; "
+                    "make a short title up if they didn't give one, but ask for a missing date or time instead of "
+                    "guessing; pass game whenever they name one). Every option /voyage create has is here: game, "
+                    "size, seats, details, length, reminders, repeat, tagging the game's role (notify), the "
+                    "pregame lobby thread (lobby) and when a series' next card goes up (repeat_wait); none of "
+                    "them needs a Quartermaster. 'answer' "
                     "one (answer: aboard, maybe, cant or clear); 'edit' one they organized (only the fields they "
                     "asked to change); 'series' to see a repeating voyage's coming dates; 'skip_date' or "
                     "'restore_date' for one date of a series they organized; 'cancel' one they organized "
@@ -54,13 +59,31 @@ ACTION_TOOLS = [
          "date": {"type": "string", "description": "As they said it: 'friday', 'tomorrow', '10/3'. For "
                                                     "skip_date/restore_date, the date to skip or put back."},
          "time": {"type": "string", "description": "As they said it: '8pm', '20:30', '8pm ET'."},
-         "game": {"type": "string", "description": "plan only: the game, or leave out for a general server event."},
+         "game": {"type": "string", "description": "plan only: the game as they named it (\"Ale & Tale\", "
+                                                    "\"SoT\"); leave out only for a general server event."},
          "size": {"type": "string", "description": "plan only: crew size if they said one, e.g. 'Galleon'."},
          "seats": {"type": "integer", "description": "Only if they asked for a number of seats."},
          "details": {"type": "string"},
          "repeat": {"type": "string", "description": f"Only if they asked: {REPEAT_HELP}."},
          "repeat_ends": {"type": "string", "description": "The last date a series runs, or 'never'."},
          "reminders": {"type": "string", "description": "Only if they asked, e.g. '1d, 1h' or 'none'."},
+         "duration": {"type": "integer", "description": "Only if they said how long: minutes, 15 to 720 "
+                                                       "(default 120)."},
+         "notify": {"type": "string", "enum": ["posted", "reminders", "off"],
+                    "description": "Tagging the game's ping role (\"tag the group\", \"ping everyone who plays "
+                                   "it\"): 'posted' when the card goes up (the default for a game), 'reminders' "
+                                   "also at each reminder and when it sails, 'off' never. Only if they asked."},
+         "lobby": {"type": "string", "description": "The pregame lobby thread, only if they mentioned it: 'on' "
+                                                  "(the server's usual time), a time before the start like "
+                                                  "'30m' or '2h' (15m to 1d), 'off', or 'default'."},
+         "repeat_wait": {"type": "string", "description": "For a repeating voyage, only if they asked when the "
+                                                        "next card goes up: 'now' (as soon as this one sails), a "
+                                                        "wait after it ends like '12h' or '1d' (up to 3d), or "
+                                                        "'default'."},
+         "picture": {"type": "boolean", "description": "plan or edit: true to put the picture they attached to "
+                                                     "this very message on the card (only when the message says "
+                                                     "a picture is attached)."},
+         "remove_picture": {"type": "boolean", "description": "edit only: true to take the card's picture off."},
          "answer": {"type": "string", "enum": ["aboard", "maybe", "cant", "clear"]},
          "whole_series": {"type": "boolean"}},
          "required": ["action"]}},
@@ -171,6 +194,7 @@ class Turn:
     spawn: object = None   # callable(coroutine) for work that shouldn't hold up the reply
     done: list[str] = field(default_factory=list)
     acted: bool = False    # an action tool was called in this answer
+    pictures: list = field(default_factory=list)   # pictures attached to the asking message (1.9.0: voyage cards)
     nudged: bool = False   # Claude was asked once to back up a claim with a tool call
 
     def receipt(self, text: str) -> None:
@@ -193,6 +217,42 @@ def find_game(text: str | None, crew_call: bool = False):
             return g
     hits = [g for g in pool if want and (want in games.normalise(g.name) or games.normalise(g.name) in want)]
     return hits[0] if len(hits) == 1 else None
+
+
+def game_in(text: str | None):
+    """The one game a title or note names ("Ale & Tale Tavern night", "Slay the Spire 2 run"), or None. Only
+    real games (never Server event or the Hangout), and only when exactly one is named."""
+    t = games.normalise(text or "")
+    if not t:
+        return None
+    hits = [g for g in games.GAMES if not g.open_ended and any(len(n) >= 4 and n in t for n in g.names())]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _notify(text) -> str | None:
+    t = str(text or "").strip().lower()
+    return t if t in ("posted", "reminders", "off") else None
+
+
+def _duration(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and 15 <= value <= 720 else None
+
+
+def _lobby_text(value, s) -> str:
+    """The lobby as parse_lobby reads it. "on" (or "yes") is the server's time, or an hour if the server has none."""
+    t = str(value).strip().lower()
+    if t in ("on", "yes", "true", "enable", "enabled"):
+        return "default" if s.lobby_minutes else "1h"
+    return t
+
+
+def _wait_text(value) -> str:
+    t = str(value).strip().lower()
+    if not t:
+        return "default"
+    if parse_repost(t) not in (None, 0) and parse_repost(t) > 3 * 1440:
+        raise ParseError("The next card can wait up to 3 days after the last one ends.")
+    return t
 
 
 def game_list(crew_call: bool = False) -> str:
@@ -382,7 +442,7 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         return "Voyages are switched off."
     action = a.get("action")
     if action == "plan":
-        out = await _plan_voyage(bot, cog, guild, author, channel, s, a)
+        out = await _plan_voyage(bot, cog, guild, author, channel, s, a, turn)
         if out.startswith("Planned voyage #"):
             turn.receipt(out.split(" at <t:")[0].replace("Planned voyage", "Planned"))
         return out
@@ -422,7 +482,18 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
     if action == "edit":
         fields = dict(title=a.get("title"), date=a.get("date"), time=a.get("time"), description=a.get("details"),
                       reminders=a.get("reminders"), seats=a.get("seats"), repeat=_repeat_word(a.get("repeat")),
-                      repeat_ends=a.get("repeat_ends"))
+                      repeat_ends=a.get("repeat_ends"), notify=_notify(a.get("notify")),
+                      duration=_duration(a.get("duration")))
+        try:
+            if a.get("lobby") is not None:
+                fields["lobby"] = _lobby_text(a["lobby"], s)
+            if a.get("repeat_wait") is not None:
+                fields["repeat_wait"] = _wait_text(a["repeat_wait"])
+        except ParseError as e:
+            return f"That didn't work: {e}"
+        g = find_game(a["game"]) if a.get("game") else None
+        if a.get("game") and (g is None or g.key != v.game_key):
+            return "A voyage's game can't change; cancel it and plan a new one if they want another game."
     elif action in ("skip_date", "restore_date"):
         if v.repeat == "none":
             return f"\"{v.title}\" doesn't repeat, so there are no dates to skip; cancel it instead."
@@ -435,6 +506,14 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
         changes, skip_this, tz, whose, starts = await cog.plan_edit(v, author.id, **fields)
     except EditRefused as e:
         return voice.say(e.key, **e.kw)
+    if action == "edit":
+        image, problem = await _picture(bot, a, turn)
+        if problem:
+            return problem
+        if image:
+            changes["image"] = image
+        elif a.get("remove_picture") and v.image:
+            changes["image"] = None
     if not changes and not skip_this:
         return "Nothing to change; ask them what they want different."
     v2 = await cog.apply_series(guild, v, changes, skip_this)
@@ -445,7 +524,23 @@ async def _voyage(bot, guild, author, channel, s, a: dict, turn: Turn) -> str:
     return await cog.edit_text(v2, changes, skip_this, tz, whose, starts)
 
 
-async def _plan_voyage(bot, cog, guild, author, channel, s, a: dict) -> str:
+async def _picture(bot, a: dict, turn: Turn | None) -> tuple[str | None, str | None]:
+    """The attached picture saved for a card, when asked for: (its stored name, None) or (None, why not)."""
+    from . import images
+    if not a.get("picture"):
+        return None, None
+    found = (turn.pictures if turn is not None else [])[:1]
+    if not found:
+        return None, ("There's no picture attached to their message. Ask them to send it again with the picture "
+                      "attached (or use /voyage create or /voyage edit).")
+    try:
+        return await images.save(found[0], bot.config.data_dir), None
+    except (images.ImageError, discord.HTTPException, OSError) as e:
+        log.warning("Parley voyage picture refused: %r", e)
+        return None, f"That picture won't do: {images.reason(e)} Nothing was changed."
+
+
+async def _plan_voyage(bot, cog, guild, author, channel, s, a: dict, turn: Turn | None = None) -> str:
     title = " ".join(str(a.get("title") or "").split())[:80]
     if not title:
         return "It needs a title."
@@ -456,6 +551,12 @@ async def _plan_voyage(bot, cog, guild, author, channel, s, a: dict) -> str:
         profile = find_game(a["game"])
         if profile is None:
             return f"I don't know the game \"{a['game']}\". The games are: {game_list()}."
+    else:
+        profile = game_in(title) or game_in(str(a.get("details") or ""))  # "Ale & Tale Tavern on the 10th"
+    notify = _notify(a.get("notify")) or "posted"
+    duration = _duration(a.get("duration"))
+    if a.get("duration") is not None and duration is None:
+        return "The length must be 15 to 720 minutes."
     tz, whose = await cog.reading_zone(author.id, guild.id)
     now = now_utc()
     try:
@@ -470,6 +571,8 @@ async def _plan_voyage(bot, cog, guild, author, channel, s, a: dict) -> str:
         local_day = starts.astimezone(tz).date()
         repeat = resolve_repeat(_repeat_word(a.get("repeat")) or "none", local_day)
         until = cog.read_until(a.get("repeat_ends"), repeat, local_day, tz)
+        lobby = parse_lobby(_lobby_text(a["lobby"], s)) if a.get("lobby") is not None else None
+        wait = parse_repost(_wait_text(a["repeat_wait"])) if a.get("repeat_wait") is not None else None
     except ParseError as e:
         return f"That didn't work: {e}"
     if starts <= now + timedelta(minutes=1) or starts > now + timedelta(days=366):
@@ -485,20 +588,34 @@ async def _plan_voyage(bot, cog, guild, author, channel, s, a: dict) -> str:
     channel_to = cog.voyage_channel(guild, s) or channel
     if channel_to is None or isinstance(channel_to, discord.Thread):
         return "There's no voyage channel to post in; a Quartermaster sets one with /admin voyages channel."
+    image, problem = await _picture(bot, a, turn)
+    if problem:
+        return problem
     v = await cog.launch(guild, channel_to, author.id, title=title,
                          description=(str(a.get("details") or "").strip()[:1000] or None), profile=profile,
-                         size_label=size_label, capacity=capacity, starts=starts, duration=120, minutes=minutes,
-                         repeat=repeat, ping_role="posted", repeat_until=until)
+                         size_label=size_label, capacity=capacity, starts=starts, duration=duration or 120,
+                         minutes=minutes, repeat=repeat, ping_role=notify, repeat_until=until, lobby_minutes=lobby,
+                         repost_minutes=wait if repeat != "none" else None, image=image)
     if v is None:
         return "PlunderBot couldn't post the voyage card."
     link = f"https://discord.com/channels/{v.guild_id}/{v.channel_id}/{v.message_id}"
     read_as = "their own time zone" if whose == "yours" else ("the zone they typed" if whose == "typed"
                                                                else f"the server's time zone ({zone_label(tz, starts)})")
     from .voyage_logic import describe_repeat
-    return (f"Planned voyage #{v.id} \"{title}\"{f' ({profile.name} {size_label})' if profile else ''} at "
-            f"<t:{int(starts.timestamp())}:F> (the time was read in {read_as}), with them Aboard. Reminders: "
-            f"{format_reminders(minutes)}."
-            + (f" Repeats: {describe_repeat(repeat)}." if repeat != "none" else "")
+    tagged = {"posted": "tagged when the card went up", "reminders": "tagged when posted, at each reminder and "
+              "when it sails", "off": "not tagged"}[notify]
+    role = await cog.game_role(guild, v) if profile is not None else None
+    lobby_now = lobby_for(v.lobby_minutes, s.lobby_minutes)
+    return (f"Planned voyage #{v.id} \"{title}\"{f' ({profile.name} {size_label})' if profile else ' (a general server event, no game)'} at "
+            f"<t:{int(starts.timestamp())}:F> (the time was read in {read_as}), {v.duration_min} minutes long, "
+            f"with them Aboard. Reminders: {format_reminders(minutes)}."
+            + (f" The game's role {role.name if role else '(none set for this game, so nobody)'} is {tagged}."
+               if profile is not None else "")
+            + (f" Pregame lobby thread: opens {format_lobby(lobby_now)} the start." if lobby_now
+               else " Pregame lobby thread: none.")
+            + (f" Repeats: {describe_repeat(repeat)}; each next card goes up "
+               f"{format_repost(repost_for(v.repost_minutes, s.repost_minutes))}." if repeat != "none" else "")
+            + (" Their picture is on the card." if image else "")
             + f" Card: {link}. They can change it by asking, or with /voyage edit.")
 
 

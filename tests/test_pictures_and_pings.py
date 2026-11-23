@@ -120,6 +120,13 @@ def sot_role(env):
     return role
 
 
+async def planned_days_ago(bot, v, starts):
+    """As if planned two days ahead, so its 1-day reminder is due whatever the time of day the tests run."""
+    await bot.db.conn.execute("UPDATE voyages SET created_at = ? WHERE id = ?",
+                              ((starts - timedelta(days=2)).isoformat(), v.id))
+    await bot.db.conn.commit()
+
+
 async def test_notify_choices(env, sot_role):
     bot, cog, guild, text = env
     await bot.db.set_game_ping_role(10, "sot", 77)
@@ -131,6 +138,7 @@ async def test_notify_choices(env, sot_role):
     assert "<@&77>" in text.sent[-1][0]
     default = [v for v in await bot.db.voyages_with_status("scheduled") if v.title == "Default"][0]
     starts = datetime.fromisoformat(default.starts_at)
+    await planned_days_ago(bot, default, starts)
     await cog.on_button(interaction_for(guild, 2), "aboard", default.id)
     await cog.tick(guild, default.id, starts - timedelta(hours=23))
     assert "<@2>" in text.sent[-1][0] and "<@&77>" not in text.sent[-1][0]
@@ -138,6 +146,7 @@ async def test_notify_choices(env, sot_role):
     await make_voyage(cog, guild, title="Loud", notify=SimpleNamespace(value="reminders", name="r"))
     loud = [v for v in await bot.db.voyages_with_status("scheduled") if v.title == "Loud"][0]
     starts = datetime.fromisoformat(loud.starts_at)
+    await planned_days_ago(bot, loud, starts)
     await cog.tick(guild, loud.id, starts - timedelta(hours=23))  # only the organizer is aboard
     content, kw = text.sent[-1]
     assert content.startswith("<@&77>") and kw["allowed_mentions"].roles == [sot_role]

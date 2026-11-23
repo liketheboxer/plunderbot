@@ -16,7 +16,7 @@ def test_every_line_fills_in(key):
                   local="8:00 PM", member="@Newbie", server="Brimstone Hill Fortress", rules="#welcome",
                   orientation="#new-pirate-orientation", deadline="in 4 days", days=7, changes="Added @UK.", forum="#game-discussion", daily=20,
                   haul="🪙 12,345 gold", ship="⛵ The Brimstone Belle", position=3, count=12, name="Sea Shanties",
-                  reason="it's private")
+                  reason="it's private", thread="#lobby")
     fields = {f for line in voice.LINES[key] for _, f, _, _ in string.Formatter().parse(line) if f}
     assert fields <= set(values) | {"cuss"}, f"{key} uses unknown fields: {fields - set(values)}"
     for i in range(len(voice.LINES[key]) * 4):

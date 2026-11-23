@@ -434,3 +434,114 @@ def render_voyage(v, rsvps: Rsvps, profile: GameProfile | None, emoji: str,
         embed.set_footer(text=f"Reminders: {format_reminders(v.reminder_minutes)}. "
                               "A voice channel opens at the start.")
     return embed
+
+
+# ------------------------------------------------------------ the lobby thread
+# A thread on the event's card that opens a while before it starts: everyone Going or Maybe is tagged in it,
+# the maybes can answer there, and last-minute plans stay out of the main channel. The reminder due at the
+# same time is replaced by it; later reminders go into the thread.
+LOBBY_CHOICES = [15, 30, 60, 120, 180, 360, 720, 1440]
+LOBBY_MAX = 1440
+
+
+def lobby_for(own: int | None, server_default: int) -> int:
+    """Minutes before the start that this event's lobby opens (0: none). None on the event: the server's."""
+    minutes = server_default if own is None else own
+    return minutes if isinstance(minutes, int) and 0 < minutes <= LOBBY_MAX else 0
+
+
+def lobby_due(starts: datetime, minutes: int, state: str, now: datetime) -> bool:
+    """Whether the lobby should open now: it has a time, hasn't been tried, and the start is still ahead."""
+    return minutes > 0 and not state and starts - timedelta(minutes=minutes) <= now < starts
+
+
+def parse_lobby(text: str | None) -> int | None:
+    """"default" (or nothing): None, the server's setting. "off"/"none"/"0": 0. Otherwise one time like the
+    reminders take (1h, 30m), between 5 minutes and a day."""
+    t = (text or "").strip().lower()
+    if t in ("", "default", "server default"):
+        return None
+    if t in ("off", "none", "no", "0"):
+        return 0
+    found = parse_reminders(t)
+    if len(found) != 1:
+        raise ParseError("Give one time for the lobby, like 1h or 30m (or off).")
+    if not 5 <= found[0] <= LOBBY_MAX:
+        raise ParseError("The lobby opens between 5 minutes and a day before the start.")
+    return found[0]
+
+
+def format_lobby(minutes: int) -> str:
+    """"1 hour before", or "no lobby"."""
+    if not minutes:
+        return "no lobby"
+    return format_reminders([minutes])
+
+
+# ------------------------------------------------------------ when a repeating series posts its next card (1.9.0)
+# By default the next voyage of a series goes up as soon as the last one sets sail. A wait holds it back until
+# a while after the last one ends (its start plus its length), so the channel isn't showing next week's card
+# while this week's crew is still out. It always goes up in time for its own first reminder or lobby thread.
+REPOST_CHOICES = [60, 180, 360, 720, 1440, 2880, 4320]
+REPOST_MAX = 7 * 1440
+REPOST_LEAD_MIN = 60          # the card is up at least this long before the start, whatever the wait says
+
+
+def repost_for(own: int | None, server_default: int | None) -> int:
+    """Minutes after the last voyage ends that the next card goes up (0: as soon as the last one sails)."""
+    minutes = server_default if own is None else own
+    return minutes if isinstance(minutes, int) and 0 < minutes <= REPOST_MAX else 0
+
+
+def parse_repost(text: str | None) -> int | None:
+    """"default" (or nothing): None, the server's setting. "now"/"0"/"off": 0, as soon as the last one sails.
+    Otherwise one time like the reminders take (12h, 1d), up to a week."""
+    t = (text or "").strip().lower()
+    if t in ("", "default", "server default"):
+        return None
+    if t in ("now", "off", "none", "no", "0", "sail", "when it sails"):
+        return 0
+    m = re.fullmatch(r"(\d+)\s*(d|h|m)", t)
+    if not m:
+        raise ParseError("Give one wait for the next card, like 12h or 1d (or now).")
+    n = int(m[1]) * {"d": 1440, "h": 60, "m": 1}[m[2]]
+    if not 15 <= n <= REPOST_MAX:
+        raise ParseError("The next card can wait from 15 minutes to a week after the last voyage ends.")
+    return n
+
+
+def format_wait(minutes: int) -> str:
+    """"3 hours", "1 day", "2 days", "45 min"."""
+    if minutes % 1440 == 0:
+        return f"{minutes // 1440} day{'s' if minutes >= 2880 else ''}"
+    if minutes % 60 == 0:
+        return f"{minutes // 60} hour{'s' if minutes >= 120 else ''}"
+    return f"{minutes} min"
+
+
+def format_repost(minutes: int) -> str:
+    """"as soon as the last one sets sail", or "1 day after the last one ends"."""
+    if not minutes:
+        return "as soon as the last one sets sail"
+    return f"{format_wait(minutes)} after the last one ends"
+
+
+def repost_at(prev_starts: datetime, prev_minutes: int, wait: int, next_starts: datetime,
+              reminders: list[int], lobby: int) -> datetime | None:
+    """When the next card of a series goes up: the wait after the last one ends, but never later than its
+    first reminder or lobby thread (and at least an hour before it starts). None: straight away."""
+    if not wait:
+        return None
+    wanted = prev_starts + timedelta(minutes=prev_minutes + wait)
+    lead = max([REPOST_LEAD_MIN, lobby] + list(reminders))
+    return min(wanted, next_starts - timedelta(minutes=lead))
+
+
+def held_until(post_at: str | None, message_id: int | None, starts: datetime, reminders: list[int],
+               lobby: int) -> datetime | None:
+    """For a voyage whose card hasn't gone up yet: when it must go up (its own time, or sooner if it was
+    moved earlier, so it's up before its first reminder or lobby). None when it's already up."""
+    if message_id or not post_at:
+        return None
+    lead = max([REPOST_LEAD_MIN, lobby] + list(reminders))
+    return min(datetime.fromisoformat(post_at), starts - timedelta(minutes=lead))

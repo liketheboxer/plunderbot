@@ -28,6 +28,7 @@ DEFAULTS: dict[tuple[str, str], str] = {
     ("rivals", ""): "🦸",
     ("lol", ""): "⚔️",
     ("lethal", ""): "📦",
+    ("sts2", ""): "🃏",
     ("hangout", ""): "🛋️",
     ("event", ""): "🗓️",
 }

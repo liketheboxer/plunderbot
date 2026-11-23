@@ -206,6 +206,32 @@ LINES: dict[str, list[str]] = {
     "voyage_cancelled": [
         "{cuss} **{title}** has been cancelled. Sorry, {names}!",
     ],
+    # the lobby thread (1.8.0)
+    "lobby_open": [
+        "⚓ The lobby for **{title}** is open! We set sail {when}. Last-minute plans, who's bringing what, "
+        "where to meet: it all goes here. Change your answer with the buttons below.",
+        "⚓ All hands to the lobby for **{title}**, sailing {when}. Sort out the last details here, and "
+        "use the buttons if your plans have changed.",
+    ],
+    "lobby_ping": [
+        "Ahoy {names}! **{title}** sets sail {when}.",
+        "{names}: your butler reports **{title}** sails {when}. Do gather your things.",
+    ],
+    "lobby_maybes": [
+        "{names}: you're down as a maybe. Are you coming aboard? Tap **Aboard** or **Can't make it** above.",
+    ],
+    "lobby_role": [
+        "{role}: **{title}** sets sail {when}. The lobby's open in {thread}.",
+    ],
+    "lobby_moved": [
+        "Change of plans: **{title}** now sets sail {when}.",
+    ],
+    "lobby_starting": [
+        "⚓ **{title}** is setting sail! Into {channel} with you.",
+    ],
+    "lobby_over": [
+        "**{title}** has made port. Closing up the lobby; fair winds!",
+    ],
     "voyage_cancel_done": [
         "Voyage cancelled, and everyone who'd answered has been told.",
     ],

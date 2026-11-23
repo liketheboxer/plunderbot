@@ -488,3 +488,71 @@ async def test_a_claim_without_a_tool_call_is_checked_and_receipts_come_from_the
                                  Turn()) == "Ahoy! How can I help?" and len(parley.claude.calls) == 1
     assert with_receipts("x" * 3000, ["Aboard for A (#1)"]).endswith("-# ✅ Aboard for A (#1)")
     assert len(with_receipts("x" * 3000, ["Aboard for A (#1)"])) <= 2000
+
+
+async def test_planning_in_plain_speech_sets_every_option(env, monkeypatch):
+    """1.9.0: "Make us an event for Ale & Tale Tavern on December 10th at 6:30pm. Tag the group. Enable the pregame
+    lobby." picks the game from the title, and the tool reaches every option /voyage create has."""
+    from plunderbot.parley_actions import game_in
+    bot, guild, here = await _setup(env, monkeypatch)
+    boxer = who(1)
+    assert game_in("Ale & Tale Tavern").key == "aletale" and game_in("Friday Slay the Spire II run").key == "sts2"
+    assert game_in("Fort Night") is None and game_in("Server event") is None and game_in("Event") is None
+    await bot.db.update_settings(10, lobby_minutes=0)
+    out = await act(bot, guild, boxer, here, "voyage", {"action": "plan", "title": "Ale & Tale Tavern",
+                                                        "date": "tomorrow", "time": "6:30pm", "notify": "reminders",
+                                                        "lobby": "on"})
+    v = (await bot.db.voyages_with_status("scheduled", guild_id=10))[-1]
+    assert v.game_key == "aletale" and v.ping_role == "reminders" and v.lobby_minutes == 60, out
+    assert "Ale & Tale Tavern" in out and "Pregame lobby thread: opens 1 hour before" in out
+    out = await act(bot, guild, boxer, here, "voyage", {
+        "action": "plan", "title": "Spire climb", "game": "slay the spire 2", "size": "3 players", "date": "tomorrow",
+        "time": "9pm", "duration": 90, "repeat": "weekly", "repeat_wait": "12h", "lobby": "30m", "notify": "off"})
+    v = (await bot.db.voyages_with_status("scheduled", guild_id=10))[-1]
+    assert (v.game_key, v.capacity, v.duration_min, v.repost_minutes, v.lobby_minutes, v.ping_role) == (
+        "sts2", 3, 90, 720, 30, "off"), out
+    assert "12 hours after the last one ends" in out
+    assert "up to 3 days" in await act(bot, guild, boxer, here, "voyage", {
+        "action": "plan", "title": "x", "date": "tomorrow", "time": "9pm", "repeat": "weekly", "repeat_wait": "5d"})
+    # and editing them
+    out = await act(bot, guild, boxer, here, "voyage", {"action": "edit", "name": "spire climb", "lobby": "off",
+                                                        "notify": "posted", "duration": 150, "repeat_wait": "now"})
+    v = await bot.db.get_voyage(v.id)
+    assert (v.lobby_minutes, v.ping_role, v.duration_min, v.repost_minutes) == (0, "posted", 150, 0), out
+    assert "can't change" in await act(bot, guild, boxer, here, "voyage", {"action": "edit", "name": "spire climb",
+                                                                          "game": "Sea of Thieves"})
+
+
+async def test_a_picture_sent_with_the_request_goes_on_the_card(env, monkeypatch):
+    """1.9.0: "plan Fort Night Friday at 8 with this picture" (picture attached) puts it on the card."""
+    from tests.test_pictures import png as png_bytes
+    bot, guild, here = await _setup(env, monkeypatch)
+    boxer = who(1)
+
+    class Pic:
+        filename, content_type = "banner.png", "image/png"
+
+        def __init__(self, data, content_type="image/png"):
+            self.data, self.size, self.content_type = data, len(data), content_type
+
+        async def read(self):
+            return self.data
+    plan = {"action": "plan", "title": "Fort Night", "date": "tomorrow", "time": "8pm", "game": "SoT",
+            "picture": True}
+    assert "no picture attached" in await act(bot, guild, boxer, here, "voyage", plan, Turn())
+    assert not await bot.db.voyages_with_status("scheduled", guild_id=10)       # nothing was planned
+    out = await act(bot, guild, boxer, here, "voyage", plan, Turn(pictures=[Pic(png_bytes())]))
+    v = (await bot.db.voyages_with_status("scheduled", guild_id=10))[0]
+    assert v.image and "picture is on the card" in out, out
+    out = await act(bot, guild, boxer, here, "voyage", {"action": "edit", "name": "fort night", "picture": True},
+                    Turn(pictures=[Pic(b"not a picture", "text/plain")]))
+    assert "won't do" in out and (await bot.db.get_voyage(v.id)).image == v.image
+    await act(bot, guild, boxer, here, "voyage", {"action": "edit", "name": "fort night", "remove_picture": True})
+    assert (await bot.db.get_voyage(v.id)).image is None
+
+
+def test_a_picture_for_a_voyage_card_isnt_taken_for_a_captains_log():
+    from plunderbot.cogs.ledger import EVENT_WORDS
+    assert EVENT_WORDS.search("plan a voyage friday at 8 with this picture")
+    assert EVENT_WORDS.search("make us an event for Ale & Tale")
+    assert not EVENT_WORDS.search("log this voyage") and not EVENT_WORDS.search("here's our haul")

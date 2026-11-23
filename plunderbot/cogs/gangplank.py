@@ -63,8 +63,35 @@ class Gangplank(commands.Cog):
 
     @staticmethod
     def is_harbormaster(member: discord.Member | None, s: GuildSettings) -> bool:
-        return (member is not None and not member.bot and s.harbormaster_role_id is not None
-                and member.get_role(s.harbormaster_role_id) is not None)
+        """Harbormasters, and anyone who runs the server (Administrator or Manage Server: the Viceroy),
+        can let people aboard. (1.9.0: before, a Viceroy without the Harbormaster role was ignored.)"""
+        if member is None or member.bot:
+            return False
+        if s.harbormaster_role_id is not None and member.get_role(s.harbormaster_role_id) is not None:
+            return True
+        perms = getattr(member, "guild_permissions", None)
+        return bool(perms is not None and (perms.administrator or perms.manage_guild))
+
+    async def tell(self, guild: discord.Guild, s: GuildSettings, by: discord.Member | None, text: str) -> None:
+        """Explain to whoever reacted why their Yar or Nar did nothing: a DM, or the alert channel."""
+        log.info("Gangplank in %s: %s", guild.id, text)
+        if by is not None:
+            try:
+                await by.send(text)
+                return
+            except (discord.HTTPException, AttributeError):
+                pass
+        await self.alert(guild, s, text)
+
+    async def member_of(self, guild: discord.Guild, user_id: int):
+        """The member, from the cache or (if they aren't in it) from Discord. None if they've left."""
+        member = guild.get_member(user_id)
+        if member is None and hasattr(guild, "fetch_member"):
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.HTTPException:
+                member = None
+        return member
 
     # ------------------------------------------------------------ arrivals and departures
     @commands.Cog.listener()
@@ -129,10 +156,8 @@ class Gangplank(commands.Cog):
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         if payload.guild_id is None:
             return
-        s = await self.settings_for(payload.guild_id)
-        if s is None or payload.channel_id != s.intro_channel_id:
-            return
-        if not self.is_harbormaster(payload.member, s):
+        s = await self.bot.db.get_settings(payload.guild_id)
+        if payload.channel_id != s.intro_channel_id or not self.is_harbormaster(payload.member, s):
             return
         decision = verdict(payload.emoji.id, payload.emoji.name, s.approve_emoji, s.reject_emoji)
         if decision is None:
@@ -140,21 +165,51 @@ class Gangplank(commands.Cog):
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
+        if not s.gangplank_enabled:
+            await self.tell(guild, s, payload.member, "Gangplank is off, so I didn't act on that Yar or Nar. "
+                                                      "Turn it on with `/admin gangplank on`.")
+            return
         target_id = None
         row = await self.bot.db.boarding_by_prompt(guild.id, payload.message_id)
         if row is not None:
             target_id = row.user_id
         elif payload.message_author_id is not None:
             target_id = payload.message_author_id
-        if target_id is None or target_id == payload.user_id:
+            me = getattr(self.bot, "user", None)
+            if me is not None and target_id == me.id:
+                # one of my own messages (a reminder, a welcome I lost track of): whoever it names
+                target_id = await self.named_in(guild, payload.channel_id, payload.message_id)
+        if target_id is None:
+            await self.tell(guild, s, payload.member, "I couldn't tell who that Yar or Nar was for. React on the "
+                                                      "newcomer's own introduction, or on my welcome to them.")
             return
-        await self.decide(guild, s, target_id, decision, payload.member)
+        if target_id == payload.user_id:
+            return
+        outcome = await self.decide(guild, s, target_id, decision, payload.member)
+        if outcome == "gone":
+            await self.tell(guild, s, payload.member, f"<@{target_id}> isn't in the server any more.")
+        elif outcome == "not_pending":
+            await self.tell(guild, s, payload.member,
+                            f"<@{target_id}> isn't wearing the Pending role, so there was nothing for me to "
+                            "change. If they still can't see the server, check what @everyone can see.")
+
+    async def named_in(self, guild: discord.Guild, channel_id: int, message_id: int) -> int | None:
+        """The one person (not a bot) mentioned in one of my messages, or None."""
+        channel = guild.get_channel(channel_id)
+        if channel is None or not hasattr(channel, "fetch_message"):
+            return None
+        try:
+            msg = await channel.fetch_message(message_id)
+        except discord.HTTPException:
+            return None
+        people = {m.id for m in getattr(msg, "mentions", []) if not getattr(m, "bot", False)}
+        return people.pop() if len(people) == 1 else None
 
     async def decide(self, guild: discord.Guild, s: GuildSettings, user_id: int, decision: str,
                      by: discord.Member) -> str:
         """Let someone aboard or turn them away. Returns what happened, for logs and tests."""
+        member = await self.member_of(guild, user_id)
         async with self.lock:
-            member = guild.get_member(user_id)
             row = await self.bot.db.get_boarding(guild.id, user_id)
             if member is None:
                 if row is not None:
@@ -169,7 +224,7 @@ class Gangplank(commands.Cog):
                     await member.remove_roles(guild.get_role(s.pending_role_id),
                                               reason=f"Gangplank: let aboard by {by}")
                 except discord.HTTPException as e:
-                    await self.alert(guild, s, f"I couldn't take Pending off {member.mention} ({e.status}). "
+                    await self.tell(guild, s, by, f"I couldn't take Pending off {member.mention} ({e.status}). "
                                                "Check PlunderBot's role position and Manage Roles.")
                     return "failed"
                 await self.bot.db.remove_boarding(guild.id, user_id)
@@ -177,7 +232,7 @@ class Gangplank(commands.Cog):
                 try:
                     await member.kick(reason=f"Gangplank: turned away by {by}")
                 except discord.HTTPException as e:
-                    await self.alert(guild, s, f"I couldn't kick {member.mention} ({e.status}). "
+                    await self.tell(guild, s, by, f"I couldn't kick {member.mention} ({e.status}). "
                                                "PlunderBot needs Kick Members and a role above theirs.")
                     return "failed"
                 await self.bot.db.remove_boarding(guild.id, user_id)

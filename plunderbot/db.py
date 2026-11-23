@@ -433,6 +433,19 @@ MIGRATIONS: list[str] = [
     ALTER TABLE guild_settings ADD COLUMN presence_text TEXT;
     ALTER TABLE guild_settings ADD COLUMN presence_music INTEGER NOT NULL DEFAULT 1;
     """,
+    # PlunderBot 1.8.0: the lobby thread, opened a while before the start (the server's default, or the event's own)
+    """
+    ALTER TABLE voyages ADD COLUMN lobby_minutes INTEGER;
+    ALTER TABLE voyages ADD COLUMN lobby_thread_id INTEGER;
+    ALTER TABLE voyages ADD COLUMN lobby_state TEXT NOT NULL DEFAULT '';
+    ALTER TABLE guild_settings ADD COLUMN lobby_minutes INTEGER NOT NULL DEFAULT 60;
+    """,
+    # PlunderBot 1.9.0: a repeating series can wait a while after a voyage ends before posting the next card
+    """
+    ALTER TABLE voyages ADD COLUMN repost_minutes INTEGER;
+    ALTER TABLE voyages ADD COLUMN post_at TEXT;
+    ALTER TABLE guild_settings ADD COLUMN repost_minutes INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 
@@ -482,6 +495,8 @@ class GuildSettings:
     presence_kind: str = "custom"
     presence_text: str | None = None
     presence_music: int = 1
+    lobby_minutes: int = 60          # the lobby thread opens this long before an event (0: no lobby)
+    repost_minutes: int = 0          # a series' next card goes up this long after the last one ends (0: when it sails)
 
 
 @dataclass
@@ -550,7 +565,7 @@ class Boarding:
     reminded_at: str | None = None
 
 
-_SETTING_COLUMNS = {"presence_status", "presence_kind", "presence_text", "presence_music", "ledger_reminders", "music_enabled", "music_youtube", "music_dj_role_id", "music_channel_id",
+_SETTING_COLUMNS = {"repost_minutes", "lobby_minutes", "presence_status", "presence_kind", "presence_text", "presence_music", "ledger_reminders", "music_enabled", "music_youtube", "music_dj_role_id", "music_channel_id",
                     "music_idle_minutes", "music_volume", "music_stay", "parley_enabled", "parley_budget_cents", "parley_daily", "parley_kagi_daily",
                     "shipslog_channel_id", "shipslog_weekday", "shipslog_hour", "shipslog_last",
                     "crowsnest_enabled", "forum_channel_id", "gangplank_enabled", "intro_channel_id", "pending_role_id", "harbormaster_role_id",
@@ -587,6 +602,16 @@ class Voyage:
     ping_role: str = "posted"  # off | posted | reminders: when the game's ping role is tagged
     repeat_until: str | None = None  # the last local date a repeating series runs to (YYYY-MM-DD)
     skips: str = ""                  # local dates the series skips, comma separated
+    lobby_minutes: int | None = None  # when its lobby thread opens; None: the server's default, 0: none
+    lobby_thread_id: int | None = None
+    lobby_state: str = ""            # "" not yet, opening, open, failed (reminded in the channel instead), closed
+    repost_minutes: int | None = None  # how long after it ends the series' next card waits; None: the server's
+    post_at: str | None = None       # a series' next voyage held back until then (UTC); None once its card is up
+
+    @property
+    def held(self) -> bool:
+        """Saved, but its card hasn't gone up yet (a series' next voyage waiting its turn)."""
+        return bool(self.post_at) and not self.message_id
 
     @property
     def reminder_minutes(self) -> list[int]:
@@ -599,7 +624,8 @@ class Voyage:
 
 _VOYAGE_COLUMNS = {"channel_id", "message_id", "title", "description", "game_key", "size_label", "capacity",
                    "starts_at", "duration_min", "reminders", "reminders_sent", "repeat", "series_id", "status",
-                   "event_id", "crew_id", "image", "ping_role", "repeat_until", "skips"}
+                   "event_id", "crew_id", "image", "ping_role", "repeat_until", "skips",
+                   "lobby_minutes", "lobby_thread_id", "lobby_state", "repost_minutes", "post_at"}
 
 
 @dataclass
@@ -981,6 +1007,13 @@ class Database:
         row = await (await self.conn.execute(
             "SELECT 1 FROM voyages WHERE series_id = ? AND starts_at > ? LIMIT 1", (series_id, starts_at))).fetchone()
         return row is not None
+
+    async def previous_in_series(self, series_id: int, starts_at: str) -> "Voyage | None":
+        """The series' voyage just before this start, in any state (1.9.0)."""
+        row = await (await self.conn.execute(
+            "SELECT id FROM voyages WHERE series_id = ? AND starts_at < ? ORDER BY starts_at DESC, id DESC LIMIT 1",
+            (series_id, starts_at))).fetchone()
+        return await self.get_voyage(row["id"]) if row else None
 
     async def retire_series(self, series_id: int, keep_id: int) -> None:
         """A series that was re-planned from voyage keep_id: the ones still under sail stop carrying it on."""

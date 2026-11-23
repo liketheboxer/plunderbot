@@ -25,6 +25,7 @@ class GameProfile:
     tags: tuple[str, ...]
     open_ended: bool = False  # no crew size: a hangout anyone can join, with its voice channel up at once
     crew_call: bool = True    # offered in /crew start (False: only used by Voyages)
+    aliases: tuple[str, ...] = ()  # other names its ping role or forum thread might go by ("Slay the Spire II")
 
     @property
     def default_size(self) -> CrewSize:
@@ -41,8 +42,11 @@ class GameProfile:
     def matches_role_name(self, role_name: str) -> bool:
         """Whether a server role is this game's ping role, ignoring case, spaces and punctuation
         ("Plate Up!" matches PlateUp!, "Helldivers" matches Helldivers 2)."""
-        wanted = {normalise(self.name), normalise(self.short), self.key}
-        return normalise(role_name) in wanted
+        return normalise(role_name) in self.names()
+
+    def names(self) -> set[str]:
+        """Every name it goes by, normalised: name, short name, key and aliases."""
+        return {normalise(self.name), normalise(self.short), self.key} | {normalise(a) for a in self.aliases}
 
     def tag(self, value: str | None) -> str | None:
         """The canonical spelling of a tag, or None if it isn't one of this game's tags."""
@@ -86,6 +90,8 @@ GAMES: tuple[GameProfile, ...] = (
     GameProfile("lol", "League of Legends", "League",
                 (CrewSize("Duo", 2), CrewSize("Flex", 5)), ("Normals", "Ranked", "ARAM", "Arena")),
     GameProfile("lethal", "Lethal Company", "Lethal Company", _upto(4), ("Quota run",)),
+    GameProfile("sts2", "Slay the Spire 2", "Slay the Spire", _upto(4),
+                ("Co-op climb", "Ascension", "Unlocks", "Casual run"), aliases=("Slay the Spire II", "StS2")),
     GameProfile("hangout", "1 Player Hangout", "Hangout", (CrewSize("Hangout", OPEN_CAPACITY),),
                 ("Parallel play", "Just chatting", "Watch party"), open_ended=True),
     GameProfile("event", "Server event", "Event", (CrewSize("Event", OPEN_CAPACITY),),

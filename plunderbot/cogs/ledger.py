@@ -36,6 +36,9 @@ log = logging.getLogger("plunderbot.ledger")
 MAX_SHIPS = 10
 LOG_WORDS = re.compile(r"\b(log|logs|ledger|stats?|plunder|gold|haul|voyage|captain'?s?|loot|doubloons?)\b", re.I)
 PICTURE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+# A picture sent with words like these is for a voyage card (Parley puts it there, 1.9.0), not a Captain's Log.
+EVENT_WORDS = re.compile(r"\b(plan|make|create|schedule|set ?up|events?|cards?|pictures?|images?|banners?|cover|"
+                         r"edit|change|update|swap|replace)\b", re.I)
 
 
 def screenshot_of(message):
@@ -460,6 +463,8 @@ class ShipLedger(commands.Cog):
                 "Captain's Log" in (replied.content or "") or "/ship log" in (replied.content or "")
                 or any("Captain's Log" in (e.title or "") for e in replied.embeds)):
             return True
+        if EVENT_WORDS.search(text) and not re.search(r"captain'?s? ?log", text, re.I):
+            return False
         return not text or bool(LOG_WORDS.search(text))
 
     @commands.Cog.listener()

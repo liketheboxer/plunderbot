@@ -38,7 +38,7 @@ from ..crew_logic import clean_title, iso, now_utc, voice_channel_name
 from ..discord_util import self_serve_problem
 from ..ledger_logic import KINDS
 from ..menu_logic import MAX_OPTIONS, button_text, is_emoji, slug
-from ..voyage_logic import (ParseError, describe_repeat, format_reminders, parse_reminders, repeat_choices,
+from ..voyage_logic import (REPOST_CHOICES, format_repost, repost_for, LOBBY_CHOICES, format_lobby, lobby_for, ParseError, describe_repeat, format_reminders, parse_reminders, repeat_choices,
                             resolve_repeat)
 
 log = logging.getLogger("plunderbot.daisho")
@@ -140,6 +140,8 @@ def _channel_kind(c) -> str | None:
 # ------------------------------------------------------------ what the Settings screen may change
 # key: (kind, low, high). Kinds match the screen: text, category, forum, role, bool, int, zone.
 SETTINGS = {
+    "lobby_minutes": ("int", 0, 1440),         # the lobby thread, minutes before (0: none)
+    "repost_minutes": ("int", 0, 10080),       # a series' next card: minutes after the last one ends (0: when it sails)
     # the status under the bot's name: the dot, the kind of line, the line, and Now Playing while music plays
     "presence_status": ("choice", 0, 0), "presence_kind": ("choice", 0, 0), "presence_text": ("line", 0, 128),
     "presence_music": ("bool", 0, 1),
@@ -389,6 +391,8 @@ class Daisho(commands.Cog):
         out = []
         cog = self.bot.get_cog("Voyages")
         tz = await cog.tz(guild.id) if cog else None
+        settings = await self.bot.db.get_settings(guild.id)
+        lobby_default, repost_default = settings.lobby_minutes, settings.repost_minutes
         for v in vs:
             r = await self.bot.db.rsvps(v.id)
             series, choices = [], []
@@ -406,6 +410,13 @@ class Daisho(commands.Cog):
                         "repeat_until": v.repeat_until, "series": series, "repeat_choices": choices,
                         "local_date": datetime.fromisoformat(v.starts_at).astimezone(tz).date().isoformat() if tz else None,
                         "status": v.status, "ping_role": v.ping_role, "image": v.image,
+                        "lobby_minutes": v.lobby_minutes, "lobby_state": v.lobby_state,
+                        "lobby": format_lobby(lobby_for(v.lobby_minutes, lobby_default)),
+                        "lobby_thread_id": v.lobby_thread_id if v.lobby_state == "open" else None,
+                        # 1.9.0: when a series' next card goes up, and whether this one is still waiting for its turn
+                        "repost_minutes": v.repost_minutes,
+                        "repost": format_repost(repost_for(v.repost_minutes, repost_default)),
+                        "post_at": v.post_at if v.held else None,
                         "organizer_id": v.organizer_id, "organizer": self.name_of(guild, v.organizer_id),
                         "channel_id": v.channel_id, "message_id": v.message_id,
                         "aboard": [self.name_of(guild, u) for u in r.aboard],
@@ -938,6 +949,23 @@ class Daisho(commands.Cog):
             log.warning("Couldn't fetch picture %s from Daisho: %r", name, e)
             raise ApplyError("PlunderBot couldn't fetch that picture from Daisho; upload it again.")
 
+
+    @staticmethod
+    def _repost(value) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int) or (value and value not in REPOST_CHOICES):
+            raise ApplyError("Pick when the next card goes up from the list.")
+        return value
+
+    @staticmethod
+    def _lobby(value) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int) or (value and value not in LOBBY_CHOICES):
+            raise ApplyError("Pick when the lobby thread opens from the list.")
+        return value
+
     async def apply_voyage_update(self, guild, p: dict) -> str:
         cog = self.bot.get_cog("Voyages")
         v = await self.bot.db.get_voyage(int(p.get("id") or 0))
@@ -982,6 +1010,14 @@ class Daisho(commands.Cog):
                 raise ApplyError(str(e))
             if ",".join(map(str, mins)) != v.reminders:
                 changes.update(reminders=",".join(map(str, mins)), reminders_sent="")
+        if "lobby_minutes" in p:
+            lobby = self._lobby(p["lobby_minutes"])
+            if lobby != v.lobby_minutes:
+                changes["lobby_minutes"] = lobby
+        if "repost_minutes" in p:
+            wait = self._repost(p["repost_minutes"])
+            if wait != v.repost_minutes:
+                changes["repost_minutes"] = wait
         if "ping_role" in p:
             if p["ping_role"] not in ("off", "posted", "reminders"):
                 raise ApplyError("Pick when the game's role is tagged.")
@@ -1153,7 +1189,9 @@ class Daisho(commands.Cog):
         image = await self.picture_from(p) if p.get("picture") else None
         v = await cog.launch(guild, channel, member.id, title=title, description=description, profile=profile,
                              size_label=size_label, capacity=capacity, starts=starts, duration=duration,
-                             minutes=minutes, repeat=repeat, ping_role=ping, repeat_until=until, image=image)
+                             minutes=minutes, repeat=repeat, ping_role=ping, repeat_until=until, image=image,
+                             lobby_minutes=self._lobby(p.get("lobby_minutes")),
+                             repost_minutes=self._repost(p.get("repost_minutes")))
         if v is None:
             raise ApplyError(f"PlunderBot couldn't post the voyage card in #{channel.name}.")
         self.mark("voyages")

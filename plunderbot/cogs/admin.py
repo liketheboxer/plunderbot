@@ -18,7 +18,7 @@ from .. import crew_emoji, games
 from ..gangplank_logic import emoji_key, APPROVE_DEFAULT, REJECT_DEFAULT, deadline
 from ..region_logic import guess_zone
 from ..shipslog_logic import WEEKDAYS
-from ..voyage_logic import zone_from_name
+from ..voyage_logic import LOBBY_CHOICES, REPOST_CHOICES, format_lobby, format_repost, format_wait, zone_from_name
 from ..crew_logic import voice_channel_name
 from ..birthday_logic import valid_timezone
 from ..discord_util import elevated
@@ -355,6 +355,34 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         return options[:25]
 
     # ------------------------------------------------------------ voyages
+    @voyages.command(name="lobby", description="When the lobby thread opens before each voyage (each can change it)")
+    @app_commands.describe(when="How long before the start; Off for no lobby threads")
+    @app_commands.choices(when=[app_commands.Choice(name="Off", value=0)] + [
+        app_commands.Choice(name=format_lobby(m), value=m) for m in LOBBY_CHOICES])
+    async def voyages_lobby(self, interaction: discord.Interaction, when: app_commands.Choice[int]) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, lobby_minutes=when.value)
+        if when.value:
+            text = (f"Lobby threads open {format_lobby(when.value)} each voyage (unless it has its own time): "
+                    "everyone Going or Maybe is tagged in, and it takes the place of the reminder due then. "
+                    "I need Create Public Threads and Send Messages in Threads in the voyage channel.")
+        else:
+            text = "No lobby threads, unless a voyage asks for one itself. Reminders go out as before."
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @voyages.command(name="repeatwait", description="When a repeating voyage's next card goes up (each series can change it)")
+    @app_commands.describe(when="As soon as the last one sets sail, or a while after it ends")
+    @app_commands.choices(when=[app_commands.Choice(name="As soon as the last one sets sail", value=0)] + [
+        app_commands.Choice(name=f"{format_wait(m)} after the last one ends", value=m) for m in REPOST_CHOICES])
+    async def voyages_repeatwait(self, interaction: discord.Interaction, when: app_commands.Choice[int]) -> None:
+        await self.bot.db.update_settings(interaction.guild_id, repost_minutes=when.value)
+        text = f"A repeating voyage's next card goes up {format_repost(when.value)}"
+        if when.value:
+            text += (" (its start plus its length), unless the series has its own wait. It always goes "
+                     "up in time for its first reminder or lobby thread, and at least an hour before it starts.")
+        else:
+            text += ", unless the series has its own wait."
+        await interaction.response.send_message(text, ephemeral=True)
+
     @voyages.command(name="channel", description="Where voyage cards are posted (leave empty: wherever it's created)")
     async def voyages_channel(self, interaction: discord.Interaction,
                               channel: discord.TextChannel | None = None) -> None:
@@ -467,7 +495,7 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
     @gangplank.command(name="setup", description="Channels and roles for the airlock (doesn't turn it on)")
     @app_commands.describe(intro_channel="Where newcomers introduce themselves (#introductions)",
                            pending_role="The airlock role newcomers wear (Pending)",
-                           harbormaster_role="Who can let people aboard or turn them away (Harbormasters)",
+                           harbormaster_role="Who can let people aboard or turn them away (Harbormasters; Manage Server can too)",
                            rules_channel="Linked in the welcome (#welcome)",
                            orientation_channel="Where newcomers set up their profile and roles, linked once they're aboard (#pirate-profile)",
                            alert_channel="Optional: where Harbormasters hear about new intros and kicks")
@@ -501,7 +529,8 @@ class Admin(commands.GroupCog, group_name="admin", group_description="PlunderBot
         state = "on" if s.gangplank_enabled else "off (turn it on with /admin gangplank on)"
         await interaction.response.send_message(
             f"Gangplank saved. Newcomers get {pending_role.mention} and introduce themselves in "
-            f"{intro_channel.mention}; {harbormaster_role.mention} react Yar or Nar. Gangplank is {state}.",
+            f"{intro_channel.mention}; {harbormaster_role.mention} (and anyone with Manage Server) react Yar or Nar. "
+            f"Gangplank is {state}.",
             ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @gangplank.command(name="emoji", description="Which emoji approve and reject (default: server emoji named Yar and Nar)")

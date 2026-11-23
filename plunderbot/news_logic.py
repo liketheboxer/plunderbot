@@ -27,6 +27,7 @@ STEAM_APPS: dict[str, int] = {
     "helldivers": 553850,
     "rivals": 2767030,
     "lethal": 1966720,
+    "sts2": 2868840,
 }
 
 STEAM_NEWS_URL = ("https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"

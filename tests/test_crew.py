@@ -13,9 +13,9 @@ T0 = datetime(2026, 9, 29, 20, 0, tzinfo=timezone.utc)
 
 # ------------------------------------------------------------ profiles
 def test_profiles_are_consistent():
-    assert len(games.GAMES) == 17
-    assert len({g.key for g in games.GAMES}) == 17
-    assert sum(g.crew_call for g in games.GAMES) == 16  # "Server event" is only for Voyages
+    assert len(games.GAMES) == 18
+    assert len({g.key for g in games.GAMES}) == 18
+    assert sum(g.crew_call for g in games.GAMES) == 17  # "Server event" is only for Voyages
     for g in games.GAMES:
         assert g.sizes and g.tags
         assert g.open_ended or all(2 <= s.capacity <= 25 for s in g.sizes)
@@ -375,3 +375,14 @@ async def test_named_sessions(db):
     assert embed.title == "🚢 Fort Night" and "Sea of Thieves: Galleon" in embed.description
     crew = await db.update_crew(crew.id, title=None)
     assert render_card(crew, sot).title == "🚢 Sea of Thieves: Galleon"
+
+
+def test_slay_the_spire_2_by_any_of_its_names():
+    sts = games.get("sts2")
+    assert sts.name == "Slay the Spire 2" and sts.default_size.capacity == 4 and sts.crew_call
+    for role in ("Slay the Spire 2", "Slay the Spire II", "StS2", "slay the spire"):
+        assert sts.matches_role_name(role)
+    from plunderbot.cogs.noticeboard import thread_matches
+    assert thread_matches(sts, "Slay the Spire 2") and thread_matches(sts, "Slay the Spire II - co-op")
+    from plunderbot.news_logic import default_source
+    assert default_source("sts2") == ("steam", "2868840")

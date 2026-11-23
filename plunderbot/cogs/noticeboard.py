@@ -141,7 +141,7 @@ def thread_matches(game, thread_name: str) -> bool:
     """Is this forum thread about this game? Matches the name, short name or key, ignoring case and
     punctuation, or a thread name that starts with the game's name ("Sea of Thieves - LFG")."""
     name = games.normalise(thread_name)
-    wanted = {games.normalise(game.name), games.normalise(game.short), game.key}
+    wanted = game.names()
     return name in wanted or any(w and name.startswith(w) for w in wanted if len(w) >= 4)
 
 

@@ -544,3 +544,32 @@ async def test_checks_in_every_3_seconds_while_the_music_is_on(env):
     guild.voice_client = None
     cog.pace(guild)
     assert cog.loop.seconds == POLL_SECONDS
+
+
+async def test_lobby_planned_and_changed_from_daisho(env, monkeypatch):
+    bot, cog, guild = env
+    vcog = bot.get_cog("Voyages")
+
+    async def no_event(*a, **kw):
+        return None
+    monkeypatch.setattr(vcog, "sync_event", no_event)
+    guild.members[2] = SimpleNamespace(id=2, display_name="Twiddles", roles=[])
+    await bot.db.update_settings(10, voyage_channel_id=21, crew_channel_id=20)
+    later = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0).isoformat()
+    plan = {"member_id": 2, "title": "Fort Night", "starts_at": later, "game_key": "sot", "size_label": "Sloop",
+            "reminders": "1h", "repeat": "none", "ping_role": "off", "duration_min": 90, "lobby_minutes": 30}
+    res = await run(cog, guild, ("voyages", "voyage.create", plan),
+                    ("voyages", "voyage.create", {**plan, "lobby_minutes": 45}))
+    assert [r[1] for r in res] == ["applied", "failed"] and "lobby" in res[1][2]
+    v = (await bot.db.voyages_with_status("scheduled", guild_id=10))[0]
+    assert v.lobby_minutes == 30
+    snap = [x for x in await cog.snap_voyages(guild) if x["id"] == v.id][0]
+    assert snap["lobby_minutes"] == 30 and snap["lobby"] == "30 min before" and snap["lobby_thread_id"] is None
+    res = await run(cog, guild, ("voyages", "voyage.update", {"id": v.id, "member_id": 2, "lobby_minutes": None}))
+    assert res[0][1] == "applied" and (await bot.db.get_voyage(v.id)).lobby_minutes is None
+    snap = [x for x in await cog.snap_voyages(guild) if x["id"] == v.id][0]
+    assert snap["lobby"] == "1 hour before"                            # the server's default
+    res = await run(cog, guild, ("settings", "settings.update", {"fields": {"lobby_minutes": 0}}),
+                    ("settings", "settings.update", {"fields": {"lobby_minutes": 5000}}))
+    assert [r[1] for r in res] == ["applied", "failed"] and (await bot.db.get_settings(10)).lobby_minutes == 0
+

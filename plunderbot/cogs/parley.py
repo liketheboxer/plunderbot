@@ -218,8 +218,12 @@ class Parley(commands.Cog):
         system = list(system_blocks(server=guild.name, now_local=local, zone_label=local.strftime("%Z"),
                                     asker=author.display_name, asker_zone=asker_zone, lookups_left=lookups_left,
                                     cusses=voice.CUSSES))
+        from .ledger import screenshot_of
+        pictures = [p for p in [screenshot_of(message)] if p is not None]
+        if pictures:      # 1.9.0: Claude can't see it, but can put it on a voyage card
+            question += f"\n(They attached a picture to this message: {pictures[0].filename}.)"
         messages = build_messages(history, question, author.display_name)
-        turn = Turn(spawn=self.spawn)
+        turn = Turn(spawn=self.spawn, pictures=pictures)
         async with message.channel.typing():
             text = await self.converse(guild, s, system, messages, day, month, author, message.channel, turn)
         view = confirm_view(self.hold(turn.pending))

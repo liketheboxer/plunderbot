@@ -281,3 +281,41 @@ async def test_welcome_aboard_offers_role_menus(env, monkeypatch):
     await cog.on_raw_reaction_add(reaction(guild, harbormaster, 555, 1, YAR, "Yar"))
     text, kw = sent[-1]
     assert "buttons below" in text and kw["view"].children[0].custom_id == "colours:open:3"
+
+
+# ------------------------------------------------------------ 1.9.0: the Viceroy's Yar, and saying why nothing happened
+async def test_a_viceroy_without_the_harbormaster_role_can_let_people_aboard(env):
+    bot, cog, guild = env
+    newbie = Member(guild, 1)
+    viceroy = Member(guild, 2)
+    viceroy.guild_permissions = SimpleNamespace(administrator=False, manage_guild=True)
+    await cog.on_member_join(newbie)
+    await cog.on_message(intro_message(guild, newbie))
+    await cog.on_raw_reaction_add(reaction(guild, viceroy, 555, newbie.id, YAR, "Yar"))
+    assert guild.pending not in newbie.roles
+    assert await bot.db.get_boarding(5, 1) is None
+
+
+async def test_a_yar_that_changes_nothing_says_why(env):
+    bot, cog, guild = env
+    harbormaster = Member(guild, 2, guild.harbor)
+    veteran = Member(guild, 4)
+    await cog.on_raw_reaction_add(reaction(guild, harbormaster, 556, veteran.id, YAR, "Yar"))
+    assert "isn't wearing the Pending role" in harbormaster.dms[-1]
+    await bot.db.update_settings(5, gangplank_enabled=0)
+    await cog.on_raw_reaction_add(reaction(guild, harbormaster, 557, 1, YAR, "Yar"))
+    assert "Gangplank is off" in harbormaster.dms[-1]
+
+
+async def test_yar_on_one_of_my_reminders_finds_who_it_names(env, monkeypatch):
+    bot, cog, guild = env
+    newbie = Member(guild, 1)
+    harbormaster = Member(guild, 2, guild.harbor)
+    await cog.on_member_join(newbie)
+    monkeypatch.setattr(type(bot), "user", property(lambda self: SimpleNamespace(id=999)))
+
+    async def fetch_message(mid):
+        return SimpleNamespace(mentions=[newbie])
+    guild.intro.fetch_message = fetch_message
+    await cog.on_raw_reaction_add(reaction(guild, harbormaster, 4242, 999, YAR, "Yar"))
+    assert guild.pending not in newbie.roles
